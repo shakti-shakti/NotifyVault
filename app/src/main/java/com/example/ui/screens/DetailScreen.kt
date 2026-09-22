@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,14 +21,20 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -40,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -47,7 +56,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.data.NotificationEntity
+import com.example.data.OpenAppUseCase
 import com.example.ui.components.ActionCircleButton
 import com.example.ui.components.AmbientMeshBackground
 import com.example.ui.components.AppIconOrb
@@ -56,6 +68,7 @@ import com.example.ui.components.JsonViewer
 import com.example.ui.components.KeyValueRow
 import com.example.ui.components.PriorityRibbon
 import com.example.ui.components.SectionHeader
+import com.example.ui.components.instantTap
 import com.example.ui.theme.AurumPalette
 import com.example.ui.theme.CyanPulsePalette
 import com.example.ui.theme.LocalVaultColors
@@ -70,10 +83,14 @@ import com.example.ui.theme.VaultLabel
 import com.example.ui.theme.VaultTitle
 import com.example.ui.theme.getCategoryPalette
 import com.example.viewmodel.VaultViewModel
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailScreen(
     notificationId: Long,
@@ -89,8 +106,10 @@ fun DetailScreen(
     val notification by notificationFlow.collectAsStateWithLifecycle(initialValue = null)
 
     var contentExpanded by remember { mutableStateOf(true) }
+    var actionsExpanded by remember { mutableStateOf(true) }
+    var conversationExpanded by remember { mutableStateOf(true) }
     var channelExpanded by remember { mutableStateOf(true) }
-    var flagsExpanded by remember { mutableStateOf(false) }
+    var flagsExpanded by remember { mutableStateOf(true) }
     var rawExpanded by remember { mutableStateOf(false) }
 
     if (notification == null) {
@@ -131,7 +150,7 @@ fun DetailScreen(
                         .clip(CircleShape)
                         .background(colors.surface.copy(alpha = 0.8f))
                         .border(1.dp, colors.cardStroke, CircleShape)
-                        .clickable { onBack() },
+                        .instantTap(onClick = onBack),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -145,19 +164,21 @@ fun DetailScreen(
                 PriorityRibbon(label = item.category, accentPalette = categoryPalette)
             }
 
-            // 2.4 HERO HEADER (280dp)
+            // HERO HEADER (280dp)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 16.dp, bottom = 24.dp),
+                    .padding(top = 16.dp, bottom = 20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 AppIconOrb(
                     appName = item.appName,
                     accentColor = appColor,
+                    iconPath = item.appIconPath,
+                    packageName = item.packageName,
                     size = 80
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
                 Text(
                     text = item.appName,
                     style = VaultHeadline.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
@@ -168,14 +189,14 @@ fun DetailScreen(
                     text = item.packageName,
                     style = VaultCaption.copy(fontSize = 11.sp, color = colors.textTertiary)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = SimpleDateFormat("dd MMMM yyyy · HH:mm:ss", Locale.getDefault()).format(Date(item.captureTime)),
                     style = VaultCaption.copy(fontSize = 12.sp, color = colors.textSecondary)
                 )
             }
 
-            // 2.4 ACTION BAR
+            // ACTION BAR: Open App + Star + Copy + Share + Delete
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -225,18 +246,13 @@ fun DetailScreen(
                     ActionCircleButton(
                         icon = Icons.Default.OpenInNew,
                         label = "Open App",
+                        tint = appColor,
                         onClick = {
-                            try {
-                                val launchIntent = context.packageManager.getLaunchIntentForPackage(item.packageName)
-                                if (launchIntent != null) {
-                                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    context.startActivity(launchIntent)
-                                } else {
-                                    android.widget.Toast.makeText(context, "${item.appName} is not installed", android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
+                            OpenAppUseCase.openApp(
+                                context = context,
+                                packageName = item.packageName,
+                                appName = item.appName
+                            )
                         }
                     )
                     ActionCircleButton(
@@ -251,9 +267,35 @@ fun DetailScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-            // SECTION 1: CONTENT
+            // PICTURE / LARGE IMAGE PREVIEW (IF ATTACHED)
+            val pictureFile = item.picturePath?.let { File(it) }?.takeIf { it.exists() }
+            val largeIconFile = item.largeIconPath?.let { File(it) }?.takeIf { it.exists() }
+
+            if (pictureFile != null) {
+                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                    GlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                        shape = ShapeL
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(pictureFile)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Notification Picture Banner",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+            }
+
+            // SECTION 1: NOTIFICATION CONTENT
             Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                 SectionHeader(
                     title = "Notification Content",
@@ -266,6 +308,7 @@ fun DetailScreen(
                         shape = ShapeL
                     ) {
                         Column(modifier = Modifier.padding(18.dp)) {
+                            // Title
                             if (!item.title.isNullOrBlank()) {
                                 Text(
                                     text = "TITLE",
@@ -280,6 +323,7 @@ fun DetailScreen(
                                 Spacer(modifier = Modifier.height(14.dp))
                             }
 
+                            // Body Text
                             val fullBody = item.bigText ?: item.text
                             if (!fullBody.isNullOrBlank()) {
                                 Text(
@@ -292,8 +336,44 @@ fun DetailScreen(
                                     style = VaultBodyL.copy(fontSize = 14.sp, lineHeight = 22.sp),
                                     color = colors.textSecondary
                                 )
+                                Spacer(modifier = Modifier.height(14.dp))
                             }
 
+                            // SubText
+                            if (!item.subText.isNullOrBlank()) {
+                                KeyValueRow(key = "SubText", value = item.subText)
+                            }
+                            // SummaryText
+                            if (!item.summaryText.isNullOrBlank()) {
+                                KeyValueRow(key = "SummaryText", value = item.summaryText)
+                            }
+                            // InfoText
+                            if (!item.infoText.isNullOrBlank()) {
+                                KeyValueRow(key = "InfoText", value = item.infoText)
+                            }
+
+                            // Large Icon preview if present and not full picture
+                            if (largeIconFile != null && pictureFile == null) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "LARGE ICON ATTACHED",
+                                    style = VaultLabel.copy(fontSize = 10.sp, color = colors.textTertiary)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(largeIconFile)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = "Large Icon",
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .border(1.dp, colors.cardStroke, RoundedCornerShape(12.dp))
+                                )
+                            }
+
+                            // OTP Box if detected
                             if (item.hasOtp && item.otpCode != null) {
                                 Spacer(modifier = Modifier.height(14.dp))
                                 Box(
@@ -302,7 +382,7 @@ fun DetailScreen(
                                         .clip(ShapeM)
                                         .background(CyanPulsePalette.glow)
                                         .border(1.dp, CyanPulsePalette.base, ShapeM)
-                                        .clickable { clipboardManager.setText(AnnotatedString(item.otpCode)) }
+                                        .instantTap(onClick = { clipboardManager.setText(AnnotatedString(item.otpCode)) })
                                         .padding(14.dp)
                                 ) {
                                     Row(
@@ -323,36 +403,159 @@ fun DetailScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            // SECTION: ACTION ITEMS (IF NOTIFICATION HAS ACTIONS)
+            val parsedActions = remember(item.actionsJson) {
+                try {
+                    val arr = JSONArray(item.actionsJson)
+                    val list = mutableListOf<String>()
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i)
+                        val title = obj?.optString("title").orEmpty()
+                        if (title.isNotBlank()) list.add(title)
+                    }
+                    list
+                } catch (e: Exception) {
+                    emptyList<String>()
+                }
+            }
 
-            // SECTION 2: APP & CHANNEL
+            if (parsedActions.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                    SectionHeader(
+                        title = "Notification Actions (${parsedActions.size})",
+                        isExpanded = actionsExpanded,
+                        onToggle = { actionsExpanded = !actionsExpanded }
+                    )
+                    AnimatedVisibility(visible = actionsExpanded) {
+                        GlassCard(modifier = Modifier.fillMaxWidth(), shape = ShapeL) {
+                            FlowRow(
+                                modifier = Modifier.padding(14.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                parsedActions.forEach { actionTitle ->
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(ShapePill)
+                                            .background(appColor.copy(alpha = 0.15f))
+                                            .border(1.dp, appColor.copy(alpha = 0.5f), ShapePill)
+                                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = actionTitle,
+                                            style = VaultLabel.copy(color = appColor, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // SECTION: MESSAGING CONVERSATION (IF MESSAGINGSTYLE)
+            val parsedMessages = remember(item.messagingMessagesJson) {
+                try {
+                    val arr = JSONArray(item.messagingMessagesJson)
+                    val list = mutableListOf<Triple<String, String, Long>>()
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i)
+                        if (obj != null) {
+                            list.add(
+                                Triple(
+                                    obj.optString("sender"),
+                                    obj.optString("text"),
+                                    obj.optLong("time")
+                                )
+                            )
+                        }
+                    }
+                    list
+                } catch (e: Exception) {
+                    emptyList<Triple<String, String, Long>>()
+                }
+            }
+
+            if (parsedMessages.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                    SectionHeader(
+                        title = "Conversation Thread (${parsedMessages.size})",
+                        isExpanded = conversationExpanded,
+                        onToggle = { conversationExpanded = !conversationExpanded }
+                    )
+                    AnimatedVisibility(visible = conversationExpanded) {
+                        GlassCard(modifier = Modifier.fillMaxWidth(), shape = ShapeL) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                parsedMessages.forEachIndexed { index, (sender, text, time) ->
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = if (sender.isNotBlank()) sender else "Sender",
+                                                style = VaultLabel.copy(color = appColor, fontSize = 11.sp)
+                                            )
+                                            if (time > 0) {
+                                                Text(
+                                                    text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(time)),
+                                                    style = VaultCaption.copy(fontSize = 10.sp, color = colors.textTertiary)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = text,
+                                            style = VaultBodyM.copy(color = colors.textPrimary, fontSize = 13.sp)
+                                        )
+                                    }
+                                    if (index < parsedMessages.size - 1) {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // SECTION 2: APP, CHANNEL & ROUTING INFO
+            Spacer(modifier = Modifier.height(16.dp))
             Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                 SectionHeader(
-                    title = "App & Channel Info",
+                    title = "App & Routing Info",
                     isExpanded = channelExpanded,
                     onToggle = { channelExpanded = !channelExpanded }
                 )
                 AnimatedVisibility(visible = channelExpanded) {
                     GlassCard(modifier = Modifier.fillMaxWidth(), shape = ShapeL) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            KeyValueRow(key = "App Name", value = item.appName)
-                            KeyValueRow(key = "Package", value = item.packageName)
+                            KeyValueRow(key = "App Label", value = item.appName)
+                            KeyValueRow(key = "Package Name", value = item.packageName)
+                            KeyValueRow(key = "Notification ID", value = item.notificationId.toString())
+                            KeyValueRow(key = "Notification Tag", value = item.tag ?: "None")
                             KeyValueRow(key = "Channel Name", value = item.channelName ?: "Default")
                             KeyValueRow(key = "Channel ID", value = item.channelId ?: "None")
                             KeyValueRow(key = "Category", value = item.category, isAccent = true)
                             KeyValueRow(key = "Importance", value = item.importance.toString())
                             KeyValueRow(key = "Priority", value = item.priority.toString())
+                            KeyValueRow(key = "Group Key", value = item.groupKey ?: "None")
+                            KeyValueRow(key = "Sort Key", value = item.sortKey ?: "None")
+                            KeyValueRow(key = "Post Timestamp", value = SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault()).format(Date(item.postTime)))
+                            KeyValueRow(key = "Capture Timestamp", value = SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault()).format(Date(item.captureTime)))
+                            KeyValueRow(key = "Is Group Conversation", value = if (item.isGroupConversation) "YES" else "NO")
                         }
                     }
                 }
             }
 
+            // SECTION 3: SYSTEM FLAGS & SENSORY ALERTS
             Spacer(modifier = Modifier.height(16.dp))
-
-            // SECTION 3: FLAGS
             Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                 SectionHeader(
-                    title = "System Flags",
+                    title = "System Flags & Alerts",
                     isExpanded = flagsExpanded,
                     onToggle = { flagsExpanded = !flagsExpanded }
                 )
@@ -364,14 +567,50 @@ fun DetailScreen(
                             KeyValueRow(key = "Auto-Cancel", value = if (item.isAutoCancel) "YES" else "NO")
                             KeyValueRow(key = "Only Alert Once", value = if (item.isOnlyAlertOnce) "YES" else "NO")
                             KeyValueRow(key = "Group Summary", value = if (item.isGroupSummary) "YES" else "NO")
+                            KeyValueRow(key = "Sound Alert", value = if (item.hasSound) "YES" else "NO")
+                            KeyValueRow(key = "Vibration Alert", value = if (item.hasVibrate) "YES" else "NO")
+                            KeyValueRow(key = "LED Light Alert", value = if (item.hasLights) "YES" else "NO")
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            // SECTION 4: PARTICIPANTS / PEOPLE (IF ANY)
+            val parsedPeople = remember(item.peopleListJson) {
+                try {
+                    val arr = JSONArray(item.peopleListJson)
+                    val list = mutableListOf<String>()
+                    for (i in 0 until arr.length()) {
+                        val p = arr.optString(i)
+                        if (p.isNotBlank()) list.add(p)
+                    }
+                    list
+                } catch (e: Exception) {
+                    emptyList<String>()
+                }
+            }
 
-            // SECTION 4: RAW EXTRAS JSON
+            if (parsedPeople.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), shape = ShapeL) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.People, "People", tint = appColor, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Participants & People (${parsedPeople.size})", style = VaultLabel.copy(color = colors.textPrimary, fontWeight = FontWeight.Bold))
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            parsedPeople.forEach { person ->
+                                Text("• $person", style = VaultBodyM.copy(color = colors.textSecondary, fontSize = 12.sp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // SECTION 5: RAW PAYLOAD JSON
+            Spacer(modifier = Modifier.height(16.dp))
             Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                 SectionHeader(
                     title = "Raw Payload",

@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.MainActivity
 import com.example.R
+import com.example.data.CustomFilterChip
 import com.example.data.NotificationEntity
 import com.example.data.NotificationRepository
 import com.example.data.VaultDatabase
@@ -29,6 +30,21 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Calendar
+
+enum class DateRangeFilter(val label: String) {
+    ALL("All Time"),
+    TODAY("Today"),
+    YESTERDAY("Yesterday"),
+    LAST_7_DAYS("Last 7 Days")
+}
+
+data class TopAppStat(
+
+    val appName: String,
+    val packageName: String,
+    val iconPath: String?,
+    val count: Int
+)
 
 class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -63,9 +79,27 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         NotifyVaultNotificationListenerService.rescanActiveNotifications()
     }
 
-    // Active Category Filter: "All", "OTPs", "Payments", "Deliveries", "Messages", "Starred"
+    // Active Category Filter: "All", "OTPs", "Payments", "Deliveries", "Banking", "Social", "System", "Starred"
     private val _selectedFilter = MutableStateFlow("All")
     val selectedFilter: StateFlow<String> = _selectedFilter.asStateFlow()
+
+    // Dashboard App Quick-Chip active package (or null for all apps)
+    private val _selectedAppPackage = MutableStateFlow<String?>(null)
+    val selectedAppPackage: StateFlow<String?> = _selectedAppPackage.asStateFlow()
+
+    // Active Custom Filter Chip (or null)
+    private val _selectedCustomChip = MutableStateFlow<CustomFilterChip?>(null)
+    val selectedCustomChip: StateFlow<CustomFilterChip?> = _selectedCustomChip.asStateFlow()
+
+    // Contextual Search Filters
+    private val _searchDateRange = MutableStateFlow(DateRangeFilter.ALL)
+    val searchDateRange: StateFlow<DateRangeFilter> = _searchDateRange.asStateFlow()
+
+    private val _searchTypeFilters = MutableStateFlow<Set<String>>(emptySet())
+    val searchTypeFilters: StateFlow<Set<String>> = _searchTypeFilters.asStateFlow()
+
+    private val _searchSelectedApp = MutableStateFlow<String?>(null)
+    val searchSelectedApp: StateFlow<String?> = _searchSelectedApp.asStateFlow()
 
     // Search Query
     private val _searchQuery = MutableStateFlow("")
@@ -109,24 +143,54 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     val todayCount = repository.getTodayCount(getTodayStartMillis())
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    // Real Notification List according to active filter and search query
+    // Real Notification List according to active filter, quick-chip, and search query
     val notifications: StateFlow<List<NotificationEntity>> = combine(
         repository.activeNotifications,
         _selectedFilter,
+        _selectedAppPackage,
+        _selectedCustomChip,
         _searchQuery
-    ) { all, filter, query ->
-        var filtered = when (filter) {
-            "OTPs" -> all.filter { it.hasOtp }
-            "Payments" -> all.filter { it.hasAmount || it.category.equals("PAYMENT", ignoreCase = true) }
-            "Deliveries" -> all.filter { it.category.equals("DELIVERY", ignoreCase = true) || it.text?.contains("deliver", ignoreCase = true) == true }
-            "Messages" -> all.filter { it.category.equals("SOCIAL", ignoreCase = true) || it.category.equals("MESSAGES", ignoreCase = true) }
-            "Starred" -> all.filter { it.isStarred }
-            else -> all
+    ) { all, filter, appPkg, customChip, query ->
+        var list = all
+
+        // 1. Dashboard App Quick-Chip filtering
+        if (appPkg != null) {
+            list = list.filter { it.packageName == appPkg }
         }
 
+        // 2. Custom Filter Chip rule
+        if (customChip != null) {
+            list = list.filter { item ->
+                val pkgMatch = customChip.packages.isEmpty() || customChip.packages.contains(item.packageName)
+                val kwMatch = customChip.keywords.isEmpty() || customChip.keywords.any { kw ->
+                    item.title?.contains(kw, ignoreCase = true) == true ||
+                    item.text?.contains(kw, ignoreCase = true) == true
+                }
+                val regexMatch = customChip.regex.isNullOrBlank() || try {
+                    val r = Regex(customChip.regex, RegexOption.IGNORE_CASE)
+                    r.containsMatchIn(item.title ?: "") || r.containsMatchIn(item.text ?: "")
+                } catch (e: Exception) { true }
+
+                pkgMatch && kwMatch && regexMatch
+            }
+        } else {
+            // Built-in Category Filter
+            list = when (filter) {
+                "OTPs", "OTP" -> list.filter { it.hasOtp || it.category.equals("OTP", ignoreCase = true) }
+                "Payments", "Payment" -> list.filter { it.hasAmount || it.category.equals("PAYMENT", ignoreCase = true) }
+                "Deliveries", "Delivery" -> list.filter { it.category.equals("DELIVERY", ignoreCase = true) || it.text?.contains("deliver", ignoreCase = true) == true }
+                "Banking" -> list.filter { it.category.equals("BANKING", ignoreCase = true) || it.title?.contains("bank", ignoreCase = true) == true }
+                "Messages", "Social" -> list.filter { it.category.equals("SOCIAL", ignoreCase = true) || it.category.equals("MESSAGES", ignoreCase = true) }
+                "System" -> list.filter { it.category.equals("SYSTEM", ignoreCase = true) || it.packageName.startsWith("android") }
+                "Starred" -> list.filter { it.isStarred }
+                else -> list
+            }
+        }
+
+        // 3. Search query
         if (query.isNotBlank()) {
             val q = query.trim().lowercase()
-            filtered = filtered.filter {
+            list = list.filter {
                 it.title?.lowercase()?.contains(q) == true ||
                 it.text?.lowercase()?.contains(q) == true ||
                 it.appName.lowercase().contains(q) ||
@@ -134,8 +198,33 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 it.senderName?.lowercase()?.contains(q) == true
             }
         }
-        filtered
+        list
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun selectAppPackage(pkg: String?) {
+        _selectedAppPackage.value = if (_selectedAppPackage.value == pkg) null else pkg
+    }
+
+    fun selectCustomChip(chip: CustomFilterChip?) {
+        _selectedCustomChip.value = chip
+        if (chip != null) {
+            _selectedFilter.value = chip.name
+        }
+    }
+
+    fun setSearchDateRange(range: DateRangeFilter) {
+        _searchDateRange.value = range
+    }
+
+    fun toggleSearchTypeFilter(type: String) {
+        val current = _searchTypeFilters.value.toMutableSet()
+        if (current.contains(type)) current.remove(type) else current.add(type)
+        _searchTypeFilters.value = current
+    }
+
+    fun setSearchSelectedApp(pkg: String?) {
+        _searchSelectedApp.value = if (_searchSelectedApp.value == pkg) null else pkg
+    }
 
     // 100% REAL ANALYTICS CALCULATED FROM REAL NOTIFICATIONS:
 
@@ -181,13 +270,21 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // 4. Real Top Apps by volume
-    val realTopApps: StateFlow<List<Pair<String, Int>>> = repository.activeNotifications.map { list ->
+    val realTopApps: StateFlow<List<TopAppStat>> = repository.activeNotifications.map { list ->
         if (list.isEmpty()) {
             emptyList()
         } else {
-            list.groupBy { it.appName.ifBlank { "Unknown" } }
-                .map { (name, items) -> name to items.size }
-                .sortedByDescending { it.second }
+            list.groupBy { it.packageName }
+                .map { (pkg, items) ->
+                    val first = items.first()
+                    TopAppStat(
+                        appName = first.appName.ifBlank { "Unknown" },
+                        packageName = pkg,
+                        iconPath = first.appIconPath,
+                        count = items.size
+                    )
+                }
+                .sortedByDescending { it.count }
                 .take(5)
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

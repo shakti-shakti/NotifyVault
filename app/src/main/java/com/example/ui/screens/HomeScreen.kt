@@ -11,9 +11,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +35,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -50,8 +53,10 @@ import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.AllInbox
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Today
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -74,8 +79,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.AppInfoResolver
+import com.example.data.CustomFilterChip
+import com.example.data.FilterChipRepository
 import com.example.data.NotificationEntity
 import com.example.ui.components.AmbientMeshBackground
+import com.example.ui.components.AppIconOrb
+import com.example.ui.components.AppPickerMode
+import com.example.ui.components.AppPickerSheet
+import com.example.ui.components.CustomFilterDialog
 import com.example.ui.components.EmptyState
 import com.example.ui.components.GlassCard
 import com.example.ui.components.NotificationCard
@@ -98,6 +110,7 @@ import com.example.ui.theme.VaultTitle
 import com.example.viewmodel.VaultViewModel
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     viewModel: VaultViewModel,
@@ -122,6 +135,29 @@ fun HomeScreen(
     val isSelectionMode by viewModel.isSelectionMode.collectAsStateWithLifecycle()
     val selectedIds by viewModel.selectedIds.collectAsStateWithLifecycle()
     val isCaptureActive by viewModel.isCaptureActive.collectAsStateWithLifecycle()
+
+    val chipRepo = remember { FilterChipRepository.getInstance(context) }
+    val customChips by chipRepo.customChips.collectAsStateWithLifecycle()
+    val hiddenBuiltIns by chipRepo.hiddenBuiltInChips.collectAsStateWithLifecycle()
+    val quickChipPackages by chipRepo.quickChipPackages.collectAsStateWithLifecycle()
+    val topApps by viewModel.realTopApps.collectAsStateWithLifecycle()
+    val selectedAppPackage by viewModel.selectedAppPackage.collectAsStateWithLifecycle()
+    val selectedCustomChip by viewModel.selectedCustomChip.collectAsStateWithLifecycle()
+
+    var showCustomFilterDialog by remember { mutableStateOf(false) }
+    var editingCustomChip by remember { mutableStateOf<CustomFilterChip?>(null) }
+    var chipToHide by remember { mutableStateOf<String?>(null) }
+    var chipToDelete by remember { mutableStateOf<CustomFilterChip?>(null) }
+    var showAppPickerForQuickChips by remember { mutableStateOf(false) }
+    var appToUnpin by remember { mutableStateOf<String?>(null) }
+
+    val effectiveQuickChips = remember(quickChipPackages, topApps) {
+        if (quickChipPackages.isNotEmpty()) {
+            quickChipPackages
+        } else {
+            topApps.map { it.packageName }
+        }
+    }
 
     // Rotating search placeholders
     val placeholders = listOf(
@@ -412,29 +448,188 @@ fun HomeScreen(
                     }
                 }
 
-                // 2.2 D. FILTER CHIP ROW
+                // 2.2 D. FILTER CHIP ROW (Feature 2)
                 item {
-                    val filterOptions = listOf(
+                    val allBuiltIn = listOf(
                         "All",
                         "OTPs",
                         "Payments",
                         "Deliveries",
                         "Messages",
+                        "Social",
+                        "System",
                         "Starred"
                     )
+                    val visibleBuiltIns = allBuiltIn.filter { it == "All" || !hiddenBuiltIns.contains(it) }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
                             .padding(horizontal = 20.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        filterOptions.forEach { filter ->
+                        // Built-in Chips
+                        visibleBuiltIns.forEach { filter ->
+                            val isSelected = selectedFilter == filter && selectedCustomChip == null
                             VaultChip(
                                 text = filter,
-                                isSelected = selectedFilter == filter,
-                                onClick = { viewModel.setFilter(filter) }
+                                isSelected = isSelected,
+                                onClick = {
+                                    viewModel.selectCustomChip(null)
+                                    viewModel.setFilter(filter)
+                                },
+                                onLongClick = if (filter != "All") {
+                                    { chipToHide = filter }
+                                } else null
                             )
+                        }
+
+                        // Custom Created Chips
+                        customChips.forEach { chip ->
+                            val isSelected = selectedCustomChip?.id == chip.id
+                            VaultChip(
+                                text = chip.name,
+                                isSelected = isSelected,
+                                customColor = try {
+                                    Color(android.graphics.Color.parseColor(chip.colorHex))
+                                } catch (e: Exception) {
+                                    null
+                                },
+                                onClick = {
+                                    if (isSelected) {
+                                        viewModel.selectCustomChip(null)
+                                        viewModel.setFilter("All")
+                                    } else {
+                                        viewModel.selectCustomChip(chip)
+                                    }
+                                },
+                                onLongClick = {
+                                    editingCustomChip = chip
+                                }
+                            )
+                        }
+
+                        // Create Custom Filter "+" Button
+                        Box(
+                            modifier = Modifier
+                                .clip(ShapePill)
+                                .background(colors.surface.copy(alpha = 0.6f))
+                                .border(1.dp, colors.cardStroke, ShapePill)
+                                .clickable { showCustomFilterDialog = true }
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add Filter",
+                                    tint = colors.accent.base,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Filter",
+                                    style = VaultCaption.copy(
+                                        color = colors.accent.base,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 2.2 E. DASHBOARD APP QUICK-CHIPS ROW (Feature 5)
+                if (effectiveQuickChips.isNotEmpty()) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 20.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            effectiveQuickChips.forEach { pkg ->
+                                val appInfo = remember(pkg) {
+                                    AppInfoResolver.resolveSync(context, pkg)
+                                }
+                                val isSelected = selectedAppPackage == pkg
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(ShapePill)
+                                        .background(
+                                            if (isSelected) colors.accent.base.copy(alpha = 0.22f)
+                                            else colors.surface.copy(alpha = 0.6f)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) colors.accent.base else colors.cardStroke,
+                                            ShapePill
+                                        )
+                                        .combinedClickable(
+                                            onClick = { viewModel.selectAppPackage(pkg) },
+                                            onLongClick = { appToUnpin = pkg }
+                                        )
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        AppIconOrb(
+                                            appName = appInfo.appName,
+                                            accentColor = colors.accent.base,
+                                            packageName = pkg,
+                                            size = 18
+                                        )
+                                        Text(
+                                            text = appInfo.appName,
+                                            style = VaultCaption.copy(
+                                                color = if (isSelected) colors.accent.base else colors.textPrimary,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                fontSize = 11.sp
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Manage Quick Chips "+" Button
+                            Box(
+                                modifier = Modifier
+                                    .clip(ShapePill)
+                                    .background(colors.surface.copy(alpha = 0.6f))
+                                    .border(1.dp, colors.cardStroke, ShapePill)
+                                    .clickable { showAppPickerForQuickChips = true }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Pin Apps",
+                                        tint = colors.textTertiary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "Pin Apps",
+                                        style = VaultCaption.copy(
+                                            color = colors.textSecondary,
+                                            fontSize = 11.sp
+                                        )
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -775,6 +970,126 @@ fun HomeScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(bottom = 90.dp, end = 20.dp)
+            )
+        }
+
+        // Custom Filter Dialog (Create or Edit)
+        if (showCustomFilterDialog || editingCustomChip != null) {
+            CustomFilterDialog(
+                initialChip = editingCustomChip,
+                onDismiss = {
+                    showCustomFilterDialog = false
+                    editingCustomChip = null
+                },
+                onSave = { name, pkgs, keywords, regex, colorHex ->
+                    val chipToSave = (editingCustomChip ?: CustomFilterChip(
+                        name = name,
+                        packages = pkgs,
+                        keywords = keywords,
+                        regex = regex,
+                        colorHex = colorHex
+                    )).copy(
+                        name = name,
+                        packages = pkgs,
+                        keywords = keywords,
+                        regex = regex,
+                        colorHex = colorHex
+                    )
+                    chipRepo.saveCustomChip(chipToSave)
+                    showCustomFilterDialog = false
+                    editingCustomChip = null
+                },
+                onDelete = editingCustomChip?.let { chip ->
+                    {
+                        chipRepo.deleteCustomChip(chip.id)
+                        if (selectedCustomChip?.id == chip.id) {
+                            viewModel.selectCustomChip(null)
+                        }
+                        showCustomFilterDialog = false
+                        editingCustomChip = null
+                    }
+                }
+            )
+        }
+
+        // App Picker Sheet for Quick Chips (limited to 6)
+        if (showAppPickerForQuickChips) {
+            AppPickerSheet(
+                mode = AppPickerMode.MULTI_SELECT_LIMITED,
+                title = "Pin App Quick-Chips",
+                maxLimit = 6,
+                initiallySelected = effectiveQuickChips.toSet(),
+                onConfirmSelection = { packages ->
+                    chipRepo.setQuickChips(packages.toList())
+                    showAppPickerForQuickChips = false
+                },
+                onClose = { showAppPickerForQuickChips = false }
+            )
+        }
+
+        // Dialog to Hide Built-in Chip
+        if (chipToHide != null) {
+            AlertDialog(
+                onDismissRequest = { chipToHide = null },
+                title = { Text("Hide Filter Chip?", style = VaultTitle) },
+                text = {
+                    Text(
+                        "Are you sure you want to hide the \"${chipToHide}\" filter chip? You can restore it anytime in Settings.",
+                        style = VaultBodyM.copy(color = colors.textPrimary)
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            chipToHide?.let { chipRepo.hideBuiltInChip(it) }
+                            chipToHide = null
+                        }
+                    ) {
+                        Text("Hide Chip", color = colors.accent.base, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { chipToHide = null }) {
+                        Text("Cancel", color = colors.textSecondary)
+                    }
+                },
+                containerColor = colors.surface
+            )
+        }
+
+        // Dialog to Unpin Quick-Chip
+        if (appToUnpin != null) {
+            val unpinAppName = remember(appToUnpin) {
+                AppInfoResolver.resolveSync(context, appToUnpin!!).appName
+            }
+            AlertDialog(
+                onDismissRequest = { appToUnpin = null },
+                title = { Text("Unpin Quick-Chip?", style = VaultTitle) },
+                text = {
+                    Text(
+                        "Remove \"$unpinAppName\" from your dashboard quick-access chips?",
+                        style = VaultBodyM.copy(color = colors.textPrimary)
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            appToUnpin?.let { chipRepo.removeQuickChip(it) }
+                            if (selectedAppPackage == appToUnpin) {
+                                viewModel.selectAppPackage(null)
+                            }
+                            appToUnpin = null
+                        }
+                    ) {
+                        Text("Unpin", color = Color(0xFFFB7185), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { appToUnpin = null }) {
+                        Text("Cancel", color = colors.textSecondary)
+                    }
+                },
+                containerColor = colors.surface
             )
         }
     }

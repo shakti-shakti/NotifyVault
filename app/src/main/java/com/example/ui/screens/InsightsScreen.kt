@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.AmbientMeshBackground
 import com.example.ui.components.AnimatedAreaChart
+import com.example.ui.components.AppIconOrb
 import com.example.ui.components.DonutChart
 import com.example.ui.components.GlassCard
 import com.example.ui.components.RadialHeatmap
@@ -237,7 +238,7 @@ fun InsightsScreen(
                         shape = ShapeL
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            topApps.forEachIndexed { index, (appName, count) ->
+                            topApps.forEachIndexed { index, stat ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -250,14 +251,22 @@ fun InsightsScreen(
                                             text = "#${index + 1}",
                                             style = VaultCaption.copy(color = colors.accent.base, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                         )
-                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        AppIconOrb(
+                                            appName = stat.appName,
+                                            accentColor = colors.accent.base,
+                                            iconPath = stat.iconPath,
+                                            packageName = stat.packageName,
+                                            size = 28
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
                                         Text(
-                                            text = appName,
+                                            text = stat.appName,
                                             style = VaultBodyM.copy(color = colors.textPrimary, fontWeight = FontWeight.Medium)
                                         )
                                     }
                                     Text(
-                                        text = "$count alerts",
+                                        text = "${stat.count} alerts",
                                         style = VaultCaption.copy(color = colors.textSecondary)
                                     )
                                 }

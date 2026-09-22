@@ -23,23 +23,33 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Password
+import androidx.compose.material.icons.filled.Pattern
+import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +63,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.security.BiometricAuthHelper
+import com.example.security.LockManager
+import com.example.security.LockMethod
 import com.example.ui.components.AmbientMeshBackground
 import com.example.ui.components.GlassCard
 import com.example.ui.components.PrimaryPillButton
@@ -61,6 +74,7 @@ import com.example.ui.theme.DisplayM
 import com.example.ui.theme.EmeraldPalette
 import com.example.ui.theme.LocalVaultColors
 import com.example.ui.theme.ShapeL
+import com.example.ui.theme.ShapeM
 import com.example.ui.theme.ShapePill
 import com.example.ui.theme.VaultBodyM
 import com.example.ui.theme.VaultCaption
@@ -72,16 +86,42 @@ import com.example.viewmodel.VaultViewModel
 fun SettingsScreen(
     viewModel: VaultViewModel,
     onBack: () -> Unit,
+    onNavigateToExclusionRules: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVaultColors.current
     val context = LocalContext.current
+    val lockManager = remember { LockManager.getInstance(context) }
 
     val totalCount by viewModel.totalCount.collectAsStateWithLifecycle()
     val isCaptureActive by viewModel.isCaptureActive.collectAsStateWithLifecycle()
 
-    var biometricLockEnabled by remember { mutableStateOf(false) }
+    val lockMethod by lockManager.lockMethodFlow.collectAsState()
+    val isBiometricEnabled by lockManager.biometricEnabledFlow.collectAsState()
+    val isHideRecents by lockManager.hideRecentsFlow.collectAsState()
+
+    var showChangeLockFlow by remember { mutableStateOf(false) }
+    var showDisableLockDialog by remember { mutableStateOf(false) }
+    var showTimeoutMenu by remember { mutableStateOf(false) }
     var showPanicDialog by remember { mutableStateOf(false) }
+    var showEmergencyWipeDialog by remember { mutableStateOf(false) }
+
+    var lockOnScreenOff by remember { mutableStateOf(lockManager.isLockOnScreenOff()) }
+    var lockOnAppClose by remember { mutableStateOf(lockManager.isLockOnAppClose()) }
+    var blurSensitiveContent by remember { mutableStateOf(lockManager.isBlurSensitiveContent()) }
+    var currentTimeoutMs by remember { mutableStateOf(lockManager.getAutoLockTimeout()) }
+
+    if (showChangeLockFlow) {
+        ChangeLockFlow(onDismiss = { showChangeLockFlow = false })
+        return
+    }
+
+    if (showDisableLockDialog) {
+        DisableLockDialog(
+            onDismiss = { showDisableLockDialog = false },
+            onLockDisabled = { showDisableLockDialog = false }
+        )
+    }
 
     AmbientMeshBackground(modifier = modifier) {
         Column(
@@ -212,6 +252,45 @@ fun SettingsScreen(
                                 )
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Capture Exclusion Rules Button
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(ShapePill)
+                                .background(colors.elevated)
+                                .clickable { onNavigateToExclusionRules() }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Block,
+                                        contentDescription = null,
+                                        tint = colors.accent.base,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Capture Exclusion Rules & Filters",
+                                        style = VaultCaption.copy(fontWeight = FontWeight.Medium, color = colors.textPrimary)
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = colors.textTertiary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -221,7 +300,7 @@ fun SettingsScreen(
             // 2. PRIVACY & SECURITY
             Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                 Text(
-                    text = "PRIVACY & LOCAL ENCRYPTION",
+                    text = "PRIVACY & SECURITY",
                     style = VaultLabel.copy(fontSize = 11.sp, color = colors.textTertiary)
                 )
                 Spacer(modifier = Modifier.height(10.dp))
@@ -230,7 +309,8 @@ fun SettingsScreen(
                     shape = ShapeL,
                     accentBorder = true
                 ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
+                    Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        // Shield Header
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
@@ -245,39 +325,215 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "Zero-Knowledge Local Archive",
+                                    text = "Zero-Knowledge Vault Lock",
                                     style = VaultTitle.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
                                     color = colors.textPrimary
                                 )
                                 Text(
-                                    text = "Encrypted at rest on this device. Never uploaded to any cloud.",
+                                    text = "PBKDF2 encrypted credentials · Hardware keystore",
                                     style = VaultCaption.copy(color = EmeraldPalette.base, fontSize = 11.sp)
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        // Current Lock Method Status Row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(ShapeM)
+                                .background(colors.surface)
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("Active Lock Method", style = VaultCaption.copy(fontSize = 10.sp, color = colors.textTertiary))
+                                Text(lockMethod.title, style = VaultTitle.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), color = colors.textPrimary)
+                            }
+                            if (lockMethod != LockMethod.NONE) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "Change",
+                                        style = VaultCaption.copy(color = colors.accent.base, fontWeight = FontWeight.Bold),
+                                        modifier = Modifier
+                                            .clip(ShapePill)
+                                            .clickable { showChangeLockFlow = true }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                    Text(
+                                        text = "Disable",
+                                        style = VaultCaption.copy(color = CrimsonPalette.base, fontWeight = FontWeight.Bold),
+                                        modifier = Modifier
+                                            .clip(ShapePill)
+                                            .clickable { showDisableLockDialog = true }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
 
+                        // Fast Biometric Unlock Toggle
+                        if (BiometricAuthHelper.isBiometricAvailable(context) && lockMethod != LockMethod.NONE) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Fast Biometric Unlock", style = VaultBodyM.copy(color = colors.textPrimary, fontSize = 13.sp))
+                                    Text("Use fingerprint or face recognition on launch", style = VaultCaption.copy(color = colors.textTertiary, fontSize = 10.sp))
+                                }
+                                Switch(
+                                    checked = isBiometricEnabled,
+                                    onCheckedChange = { lockManager.setBiometricEnabled(it) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = colors.accent.base, checkedTrackColor = colors.accent.glow)
+                                )
+                            }
+                        }
+
+                        // Auto-lock Timeout Selector
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                Text("Biometric / PIN Screen Lock", style = VaultBodyM.copy(color = colors.textPrimary))
-                                Text("Require PIN to open vault", style = VaultCaption.copy(color = colors.textTertiary))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Auto-Lock Timeout", style = VaultBodyM.copy(color = colors.textPrimary, fontSize = 13.sp))
+                                Text("Lock vault when inactive in background", style = VaultCaption.copy(color = colors.textTertiary, fontSize = 10.sp))
+                            }
+                            Box {
+                                val timeoutLabels = mapOf(
+                                    0L to "Immediately",
+                                    15_000L to "15s",
+                                    30_000L to "30s",
+                                    60_000L to "1m",
+                                    300_000L to "5m",
+                                    -1L to "Never"
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(ShapePill)
+                                        .background(colors.surface)
+                                        .border(1.dp, colors.cardStroke, ShapePill)
+                                        .clickable { showTimeoutMenu = true }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = timeoutLabels[currentTimeoutMs] ?: "Immediately",
+                                        style = VaultCaption.copy(color = colors.accent.base, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showTimeoutMenu,
+                                    onDismissRequest = { showTimeoutMenu = false }
+                                ) {
+                                    timeoutLabels.forEach { (ms, label) ->
+                                        DropdownMenuItem(
+                                            text = { Text(label) },
+                                            onClick = {
+                                                currentTimeoutMs = ms
+                                                lockManager.setAutoLockTimeout(ms)
+                                                showTimeoutMenu = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Lock on Screen Off
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Lock on Screen-Off", style = VaultBodyM.copy(color = colors.textPrimary, fontSize = 13.sp))
+                                Text("Require unlock immediately when device display turns off", style = VaultCaption.copy(color = colors.textTertiary, fontSize = 10.sp))
                             }
                             Switch(
-                                checked = biometricLockEnabled,
+                                checked = lockOnScreenOff,
                                 onCheckedChange = {
-                                    biometricLockEnabled = it
-                                    if (it) viewModel.lockVault()
+                                    lockOnScreenOff = it
+                                    lockManager.setLockOnScreenOff(it)
                                 },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = colors.accent.base,
-                                    checkedTrackColor = colors.accent.glow
-                                )
+                                colors = SwitchDefaults.colors(checkedThumbColor = colors.accent.base, checkedTrackColor = colors.accent.glow)
                             )
+                        }
+
+                        // Lock on App Close
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Lock on App Close", style = VaultBodyM.copy(color = colors.textPrimary, fontSize = 13.sp))
+                                Text("Require unlock whenever returning from background", style = VaultCaption.copy(color = colors.textTertiary, fontSize = 10.sp))
+                            }
+                            Switch(
+                                checked = lockOnAppClose,
+                                onCheckedChange = {
+                                    lockOnAppClose = it
+                                    lockManager.setLockOnAppClose(it)
+                                },
+                                colors = SwitchDefaults.colors(checkedThumbColor = colors.accent.base, checkedTrackColor = colors.accent.glow)
+                            )
+                        }
+
+                        // Hide in Recent Apps (FLAG_SECURE)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Hide in App Switcher (FLAG_SECURE)", style = VaultBodyM.copy(color = colors.textPrimary, fontSize = 13.sp))
+                                Text("Prevents screenshots and obscures vault thumbnail", style = VaultCaption.copy(color = colors.textTertiary, fontSize = 10.sp))
+                            }
+                            Switch(
+                                checked = isHideRecents,
+                                onCheckedChange = { lockManager.setHideContentInRecents(it) },
+                                colors = SwitchDefaults.colors(checkedThumbColor = colors.accent.base, checkedTrackColor = colors.accent.glow)
+                            )
+                        }
+
+                        // Blur Sensitive Content
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Blur Sensitive Content", style = VaultBodyM.copy(color = colors.textPrimary, fontSize = 13.sp))
+                                Text("Apply frosted mask over OTPs and confidential alerts", style = VaultCaption.copy(color = colors.textTertiary, fontSize = 10.sp))
+                            }
+                            Switch(
+                                checked = blurSensitiveContent,
+                                onCheckedChange = {
+                                    blurSensitiveContent = it
+                                    lockManager.setBlurSensitiveContent(it)
+                                },
+                                colors = SwitchDefaults.colors(checkedThumbColor = colors.accent.base, checkedTrackColor = colors.accent.glow)
+                            )
+                        }
+
+                        // Emergency Vault Wipe Button
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(ShapePill)
+                                .background(CrimsonPalette.glow)
+                                .border(1.dp, CrimsonPalette.base.copy(alpha = 0.6f), ShapePill)
+                                .clickable { showEmergencyWipeDialog = true }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.DeleteForever, null, tint = CrimsonPalette.base, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Emergency Security Wipe", style = VaultCaption.copy(color = CrimsonPalette.base, fontWeight = FontWeight.Bold))
+                            }
                         }
                     }
                 }
@@ -429,5 +685,39 @@ fun SettingsScreen(
                 containerColor = colors.surface
             )
         }
+
+        // Emergency Security Wipe Confirmation Dialog
+        if (showEmergencyWipeDialog) {
+            AlertDialog(
+                onDismissRequest = { showEmergencyWipeDialog = false },
+                title = {
+                    Text("Emergency Security Wipe", style = VaultTitle.copy(color = CrimsonPalette.base, fontWeight = FontWeight.Bold))
+                },
+                text = {
+                    Text(
+                        "This will immediately destroy all archived notifications AND reset all vault lock credentials and security configurations. Continue?",
+                        style = VaultBodyM.copy(color = colors.textPrimary)
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.clearAll()
+                            lockManager.resetAllLockData()
+                            showEmergencyWipeDialog = false
+                        }
+                    ) {
+                        Text("DESTROY ALL DATA", color = CrimsonPalette.base, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showEmergencyWipeDialog = false }) {
+                        Text("Cancel", color = colors.textSecondary)
+                    }
+                },
+                containerColor = colors.surface
+            )
+        }
     }
 }
+

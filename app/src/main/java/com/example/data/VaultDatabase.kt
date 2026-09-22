@@ -6,12 +6,16 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [NotificationEntity::class],
-    version = 2,
+    entities = [
+        NotificationEntity::class,
+        AppInfoEntity::class
+    ],
+    version = 3,
     exportSchema = false
 )
 abstract class VaultDatabase : RoomDatabase() {
     abstract fun notificationDao(): NotificationDao
+    abstract fun appInfoDao(): AppInfoDao
 
     companion object {
         @Volatile
@@ -29,7 +33,7 @@ abstract class VaultDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     VaultDatabase::class.java,
-                    "notifyvault_live_v2.db"
+                    "notifyvault_live_v3.db"
                 )
                     .fallbackToDestructiveMigration()
                     .build()

@@ -67,17 +67,60 @@ fun NotifyVaultApp(
     viewModel: VaultViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val colors = LocalVaultColors.current
+    val lockManager = remember { com.example.security.LockManager.getInstance(context) }
     val isLocked by viewModel.isVaultLocked.collectAsStateWithLifecycle()
+    val isSecureRecents by lockManager.hideRecentsFlow.collectAsStateWithLifecycle()
 
     var currentRoute by remember { mutableStateOf("vault") }
     var selectedNotificationId by remember { mutableLongStateOf(1L) }
     var isOnboardingCompleted by remember { mutableStateOf(true) }
 
+    // Dynamically apply or remove FLAG_SECURE
+    DisposableEffect(isSecureRecents) {
+        val window = (context as? ComponentActivity)?.window
+        if (isSecureRecents) {
+            window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        }
+        onDispose { }
+    }
+
+    // Cold start lock check
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (lockManager.isLockConfigured()) {
+            viewModel.lockVault()
+        }
+    }
+
+    // Lifecycle observer for auto-lock timeouts and permission checks
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.checkNotificationPermission()
+                if (lockManager.shouldLockOnResume()) {
+                    viewModel.lockVault()
+                }
+            } else if (event == Lifecycle.Event.ON_PAUSE) {
+                lockManager.recordAppPaused()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     // If locked, present full-screen LockScreen
     if (isLocked) {
         LockScreen(
-            onUnlock = { viewModel.unlockVault() }
+            onUnlock = {
+                viewModel.unlockVault()
+                lockManager.unlock()
+            }
         )
         return
     }
@@ -87,19 +130,6 @@ fun NotifyVaultApp(
             onFinish = { isOnboardingCompleted = true }
         )
         return
-    }
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.checkNotificationPermission()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
     }
 
     val isTopLevelRoute = currentRoute in listOf("vault", "search", "insights", "studio")

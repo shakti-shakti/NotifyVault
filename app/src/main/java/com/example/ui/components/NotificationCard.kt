@@ -106,6 +106,7 @@ private fun DefaultNotificationCard(
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     onStarClick: (() -> Unit)?,
     onCopyOtpClick: ((String) -> Unit)?
 ) {
@@ -115,7 +116,7 @@ private fun DefaultNotificationCard(
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .instantTap(onLongClick = onLongClick, onClick = onClick),
         shape = ShapeL,
         accentBorder = isSelected || notification.isStarred
     ) {
@@ -143,6 +144,8 @@ private fun DefaultNotificationCard(
                     AppIconOrb(
                         appName = notification.appName,
                         accentColor = appColor,
+                        iconPath = notification.appIconPath,
+                        packageName = notification.packageName,
                         size = 32
                     )
 
@@ -312,7 +315,7 @@ private fun TimelineNotificationRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .instantTap(onClick = onClick)
             .padding(vertical = 4.dp)
     ) {
         // Time Rail
@@ -392,10 +395,16 @@ private fun BubbleNotificationCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .instantTap(onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 4.dp)
     ) {
-        AppIconOrb(appName = notification.appName, accentColor = categoryPalette.base, size = 34)
+        AppIconOrb(
+            appName = notification.appName,
+            accentColor = categoryPalette.base,
+            iconPath = notification.appIconPath,
+            packageName = notification.packageName,
+            size = 34
+        )
         Spacer(modifier = Modifier.width(10.dp))
         GlassCard(
             modifier = Modifier.fillMaxWidth(0.9f),
@@ -444,7 +453,7 @@ private fun CompactNotificationRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(58.dp)
-            .clickable(onClick = onClick),
+            .instantTap(onClick = onClick),
         shape = ShapeM,
         accentBorder = isSelected
     ) {
@@ -454,7 +463,13 @@ private fun CompactNotificationRow(
                 .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AppIconOrb(appName = notification.appName, accentColor = categoryPalette.base, size = 28)
+            AppIconOrb(
+                appName = notification.appName,
+                accentColor = categoryPalette.base,
+                iconPath = notification.appIconPath,
+                packageName = notification.packageName,
+                size = 28
+            )
             Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -492,11 +507,17 @@ private fun MagazineGridCard(
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .instantTap(onClick = onClick),
         shape = ShapeL
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            AppIconOrb(appName = notification.appName, accentColor = categoryPalette.base, size = 44)
+            AppIconOrb(
+                appName = notification.appName,
+                accentColor = categoryPalette.base,
+                iconPath = notification.appIconPath,
+                packageName = notification.packageName,
+                size = 44
+            )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = notification.appName.uppercase(),

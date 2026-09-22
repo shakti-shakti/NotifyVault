@@ -3,9 +3,11 @@ package com.example.ui.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -145,11 +147,15 @@ fun StatPill(
 // Selected: accent gradient fill, dark text, subtle glow, scale 1.04
 // Unselected: glass fill, hairline border, secondary text
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VaultChip(
     text: String,
     isSelected: Boolean,
     accentPalette: AccentPalette = LocalVaultColors.current.accent,
+    customColor: Color? = null,
+    icon: ImageVector? = null,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val colors = LocalVaultColors.current
@@ -159,8 +165,15 @@ fun VaultChip(
         label = "chipScale"
     )
 
-    val chipBg = if (isSelected) {
+    val activeBaseColor = customColor ?: accentPalette.base
+    val activeBrush = if (customColor != null) {
+        Brush.horizontalGradient(listOf(customColor, customColor.copy(alpha = 0.8f)))
+    } else {
         accentPalette.brush()
+    }
+
+    val chipBg = if (isSelected) {
+        activeBrush
     } else {
         Brush.verticalGradient(
             listOf(
@@ -184,27 +197,42 @@ fun VaultChip(
             .background(chipBg)
             .border(
                 width = 1.dp,
-                color = if (isSelected) accentPalette.base else colors.cardStroke,
+                color = if (isSelected) activeBaseColor else colors.cardStroke,
                 shape = ShapePill
             )
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = onClick
+                onClick = onClick,
+                onLongClick = onLongClick
             )
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = text,
-            style = VaultLabel.copy(
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = textColor,
-                fontSize = 12.sp
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = textColor,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+            Text(
+                text = text,
+                style = VaultLabel.copy(
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = textColor,
+                    fontSize = 12.sp
+                )
             )
-        )
+        }
     }
 }
+
 
 // Left 3dp vertical accent bar
 @Composable
@@ -252,8 +280,22 @@ fun AppIconOrb(
     appName: String,
     accentColor: Color,
     modifier: Modifier = Modifier,
+    iconPath: String? = null,
+    packageName: String? = null,
     size: Int = 40
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val imageModel = remember(iconPath, packageName) {
+        when {
+            !iconPath.isNullOrBlank() && java.io.File(iconPath).exists() -> java.io.File(iconPath)
+            !packageName.isNullOrBlank() -> {
+                val iconFile = java.io.File(context.filesDir, "app_icons/${packageName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")}.png")
+                if (iconFile.exists()) iconFile else null
+            }
+            else -> null
+        }
+    }
+
     Box(
         modifier = modifier
             .size(size.dp)
@@ -261,7 +303,7 @@ fun AppIconOrb(
             .background(
                 Brush.radialGradient(
                     listOf(
-                        accentColor.copy(alpha = 0.25f),
+                        accentColor.copy(alpha = 0.28f),
                         Color(0xFF101018)
                     )
                 )
@@ -269,14 +311,27 @@ fun AppIconOrb(
             .border(1.dp, accentColor.copy(alpha = 0.6f), CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = appName.take(1).uppercase(),
-            style = VaultLabel.copy(
-                fontSize = (size / 2.2).sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
+        if (imageModel != null) {
+            coil.compose.AsyncImage(
+                model = coil.request.ImageRequest.Builder(context)
+                    .data(imageModel)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = "$appName icon",
+                modifier = Modifier
+                    .size((size * 0.72).dp)
+                    .clip(CircleShape)
             )
-        )
+        } else {
+            Text(
+                text = appName.take(1).uppercase(),
+                style = VaultLabel.copy(
+                    fontSize = (size / 2.2).sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            )
+        }
     }
 }
 

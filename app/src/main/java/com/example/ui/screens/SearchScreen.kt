@@ -23,25 +23,35 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.AppInfoResolver
 import com.example.ui.components.AmbientMeshBackground
+import com.example.ui.components.AppIconOrb
+import com.example.ui.components.AppPickerMode
+import com.example.ui.components.AppPickerSheet
 import com.example.ui.components.EmptyState
 import com.example.ui.components.GlassCard
 import com.example.ui.components.NotificationCard
@@ -53,6 +63,7 @@ import com.example.ui.theme.VaultBodyM
 import com.example.ui.theme.VaultCaption
 import com.example.ui.theme.VaultLabel
 import com.example.ui.theme.VaultTitle
+import com.example.viewmodel.DateRangeFilter
 import com.example.viewmodel.VaultViewModel
 
 @Composable
@@ -62,10 +73,23 @@ fun SearchScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val colors = LocalVaultColors.current
     val customization = LocalVaultCustomization.current
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val searchResults by viewModel.notifications.collectAsStateWithLifecycle()
+    val searchDateRange by viewModel.searchDateRange.collectAsStateWithLifecycle()
+    val searchTypeFilters by viewModel.searchTypeFilters.collectAsStateWithLifecycle()
+    val searchSelectedApp by viewModel.searchSelectedApp.collectAsStateWithLifecycle()
+    val dashboardSelectedApp by viewModel.selectedAppPackage.collectAsStateWithLifecycle()
+
+    var showAppPickerForScope by remember { mutableStateOf(false) }
+
+    LaunchedEffect(dashboardSelectedApp) {
+        if (dashboardSelectedApp != null && searchSelectedApp == null) {
+            viewModel.setSearchSelectedApp(dashboardSelectedApp)
+        }
+    }
 
     val syntaxFilters = listOf(
         "has:otp",
@@ -75,6 +99,18 @@ fun SearchScreen(
 
     val recentSearches = remember {
         mutableStateListOf<String>()
+    }
+
+    if (showAppPickerForScope) {
+        AppPickerSheet(
+            mode = AppPickerMode.SINGLE_SELECT,
+            title = "Scope Search to App",
+            onSingleAppSelected = { app ->
+                viewModel.setSearchSelectedApp(app.packageName)
+                showAppPickerForScope = false
+            },
+            onClose = { showAppPickerForScope = false }
+        )
     }
 
     AmbientMeshBackground(modifier = modifier) {
@@ -131,7 +167,12 @@ fun SearchScreen(
                         Box(modifier = Modifier.weight(1f)) {
                             if (searchQuery.isEmpty()) {
                                 Text(
-                                    text = "Search OTPs, apps, text…",
+                                    text = if (searchSelectedApp != null) {
+                                        val appInfo = AppInfoResolver.resolveSync(context, searchSelectedApp!!)
+                                        "Search in ${appInfo.appName}…"
+                                    } else {
+                                        "Search OTPs, amounts, text…"
+                                    },
                                     style = VaultBodyM.copy(color = colors.textTertiary)
                                 )
                             }
@@ -161,25 +202,169 @@ fun SearchScreen(
                 }
             }
 
-            // Power Query Syntax Chips
+            // Contextual Search Filter Bar 1: Scoped App & Date Ranges
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                syntaxFilters.forEach { syntax ->
+                // App Scope Filter Chip
+                if (searchSelectedApp != null) {
+                    val appInfo = remember(searchSelectedApp) {
+                        AppInfoResolver.resolveSync(context, searchSelectedApp!!)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(ShapePill)
+                            .background(colors.accent.base.copy(alpha = 0.2f))
+                            .border(1.dp, colors.accent.base, ShapePill)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            AppIconOrb(
+                                appName = appInfo.appName,
+                                accentColor = colors.accent.base,
+                                packageName = searchSelectedApp,
+                                size = 18
+                            )
+                            Text(
+                                text = appInfo.appName,
+                                style = VaultCaption.copy(
+                                    color = colors.textPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear App Scope",
+                                tint = colors.accent.base,
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .clickable { viewModel.setSearchSelectedApp(null) }
+                            )
+                        }
+                    }
+                } else {
                     Box(
                         modifier = Modifier
                             .clip(ShapePill)
                             .background(colors.surface.copy(alpha = 0.6f))
+                            .border(1.dp, colors.cardStroke, ShapePill)
+                            .clickable { showAppPickerForScope = true }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Apps,
+                                contentDescription = null,
+                                tint = colors.textTertiary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Scope to App",
+                                style = VaultCaption.copy(
+                                    color = colors.textSecondary,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // Date Range Chips
+                DateRangeFilter.values().forEach { range ->
+                    val isSelected = searchDateRange == range
+                    Box(
+                        modifier = Modifier
+                            .clip(ShapePill)
+                            .background(
+                                if (isSelected) colors.accent.brush()
+                                else SolidColor(colors.surface.copy(alpha = 0.6f))
+                            )
+                            .border(
+                                1.dp,
+                                if (isSelected) colors.accent.base else colors.cardStroke,
+                                ShapePill
+                            )
+                            .clickable { viewModel.setSearchDateRange(range) }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = range.label,
+                            style = VaultCaption.copy(
+                                color = if (isSelected) Color(0xFF0B0B12) else colors.textSecondary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            // Contextual Search Filter Bar 2: Type Filters & Power Syntax
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Type filters
+                listOf("OTP", "Amounts", "Starred").forEach { type ->
+                    val isSelected = searchTypeFilters.contains(type)
+                    Box(
+                        modifier = Modifier
+                            .clip(ShapePill)
+                            .background(
+                                if (isSelected) colors.accent.base.copy(alpha = 0.25f)
+                                else colors.surface.copy(alpha = 0.6f)
+                            )
+                            .border(
+                                1.dp,
+                                if (isSelected) colors.accent.base else colors.cardStroke,
+                                ShapePill
+                            )
+                            .clickable { viewModel.toggleSearchTypeFilter(type) }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = type,
+                            style = VaultCaption.copy(
+                                color = if (isSelected) colors.accent.base else colors.textTertiary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+                }
+
+                // Power Query Syntax Chips
+                syntaxFilters.forEach { syntax ->
+                    Box(
+                        modifier = Modifier
+                            .clip(ShapePill)
+                            .background(colors.surface.copy(alpha = 0.5f))
                             .border(1.dp, colors.accent.base.copy(alpha = 0.35f), ShapePill)
                             .clickable {
-                                val query = syntax.substringAfter(":")
-                                viewModel.setSearchQuery(query)
+                                val current = searchQuery.trim()
+                                if (current.isEmpty()) {
+                                    viewModel.setSearchQuery(syntax)
+                                } else if (!current.contains(syntax)) {
+                                    viewModel.setSearchQuery("$current $syntax")
+                                }
                             }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Text(
                             text = syntax,
@@ -193,28 +378,28 @@ fun SearchScreen(
                 }
             }
 
-            // Recent Searches (if query is empty)
-            if (searchQuery.isEmpty()) {
-                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+            // Recent Searches (if query is empty and no custom filters)
+            if (searchQuery.isEmpty() && searchTypeFilters.isEmpty() && searchSelectedApp == null) {
+                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                     Text(
-                        text = "RECENT SEARCHES",
+                        text = "SUGGESTED FILTERS",
                         style = VaultLabel.copy(fontSize = 11.sp, color = colors.textTertiary)
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        recentSearches.forEach { term ->
+                        listOf("OTP", "Verification", "Invoice", "Payment", "Security alert").forEach { term ->
                             Box(
                                 modifier = Modifier
                                     .clip(ShapePill)
                                     .background(colors.elevated.copy(alpha = 0.5f))
                                     .border(1.dp, colors.cardStroke, ShapePill)
                                     .clickable { viewModel.setSearchQuery(term) }
-                                    .padding(horizontal = 14.dp, vertical = 7.dp)
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
                             ) {
                                 Text(term, style = VaultCaption.copy(color = colors.textSecondary))
                             }
@@ -232,7 +417,12 @@ fun SearchScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (searchQuery.isNotBlank()) "RESULTS FOR \"$searchQuery\"" else "MATCHED ALERTS",
+                    text = when {
+                        searchQuery.isNotBlank() -> "RESULTS FOR \"$searchQuery\""
+                        searchSelectedApp != null -> "FILTERED BY APP"
+                        searchTypeFilters.isNotEmpty() -> "FILTERED BY ${searchTypeFilters.joinToString()}"
+                        else -> "MATCHED ALERTS"
+                    },
                     style = VaultLabel.copy(color = colors.textTertiary, fontSize = 11.sp)
                 )
                 Text(
@@ -267,3 +457,4 @@ fun SearchScreen(
         }
     }
 }
+
