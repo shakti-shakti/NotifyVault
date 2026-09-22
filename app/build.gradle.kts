@@ -25,11 +25,11 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-release-key.jks"
       storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      storePassword = System.getenv("STORE_PASSWORD") ?: "Sh@090609"
+      keyAlias = System.getenv("KEY_ALIAS") ?: "my-key"
+      keyPassword = System.getenv("KEY_PASSWORD") ?: "Sh@090609"
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -127,4 +127,22 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen)
+}
+
+// Automatically sync latest built signed release APK to root output/ directory, deleting other files
+val syncApkToRootOutput = tasks.register<Sync>("syncApkToRootOutput") {
+  from(layout.buildDirectory.dir("outputs/apk/release"))
+  include("*.apk")
+  into(layout.projectDirectory.dir("../output"))
+  rename { fileName ->
+    if (fileName == "app-release.apk") "NotifyVault-release.apk" else fileName
+  }
+}
+
+tasks.matching { it.name == "assembleRelease" || it.name == "packageRelease" }.configureEach {
+  finalizedBy(syncApkToRootOutput)
+}
+
+tasks.matching { it.name == "assembleDebug" }.configureEach {
+  finalizedBy("assembleRelease")
 }
