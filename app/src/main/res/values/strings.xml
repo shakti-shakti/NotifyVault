@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">NotifyVault</string>
+    <string name="notification_listener_service_label">NotifyVault Archiver Service</string>
+</resources>

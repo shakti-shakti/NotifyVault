@@ -1,0 +1,6 @@
+{
+  "name": "NotifyVault",
+  "description": "A luxury notification archiver and manager for Android with the Obsidian Glass aesthetic.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
