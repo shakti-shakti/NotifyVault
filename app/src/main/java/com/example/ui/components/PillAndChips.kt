@@ -290,7 +290,9 @@ fun AppIconOrb(
             !iconPath.isNullOrBlank() && java.io.File(iconPath).exists() -> java.io.File(iconPath)
             !packageName.isNullOrBlank() -> {
                 val iconFile = java.io.File(context.filesDir, "app_icons/${packageName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")}.png")
-                if (iconFile.exists()) iconFile else null
+                if (iconFile.exists()) iconFile else runCatching {
+                    context.packageManager.getApplicationIcon(packageName)
+                }.getOrNull()
             }
             else -> null
         }

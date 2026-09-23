@@ -13,18 +13,25 @@ import com.example.data.OtpCatcherPreferences
 class CopyOtpReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val notificationId = intent.getIntExtra(OtpNotifier.EXTRA_NOTIFICATION_ID, 0)
-        if (intent.action == OtpNotifier.ACTION_COPY) {
-            val code = intent.getStringExtra(OtpNotifier.EXTRA_CODE).orEmpty()
-            val copyValue = if (OtpCatcherPreferences.getInstance(context).copyWithAppName.value) {
-                val source = intent.getStringExtra(EXTRA_SOURCE).orEmpty()
-                if (source.isBlank()) code else "$source: $code"
-            } else code
-            context.getSystemService(android.content.ClipboardManager::class.java)
-                ?.setPrimaryClip(android.content.ClipData.newPlainText("OTP", copyValue))
-            Toast.makeText(context, "OTP copied", Toast.LENGTH_SHORT).show()
-            vibrate(context)
+        when (intent.action) {
+            OtpNotifier.ACTION_COPY -> {
+                val code = intent.getStringExtra(OtpNotifier.EXTRA_CODE).orEmpty()
+                val copyValue = if (OtpCatcherPreferences.getInstance(context).copyWithAppName.value) {
+                    val source = intent.getStringExtra(EXTRA_SOURCE).orEmpty()
+                    if (source.isBlank()) code else "$source: $code"
+                } else code
+                if (code.isNotBlank()) {
+                    context.getSystemService(android.content.ClipboardManager::class.java)
+                        ?.setPrimaryClip(android.content.ClipData.newPlainText("OTP", copyValue))
+                    Toast.makeText(context, "OTP copied", Toast.LENGTH_SHORT).show()
+                    vibrate(context)
+                }
+                NotificationManagerCompat.from(context).cancel(notificationId)
+            }
+            OtpNotifier.ACTION_DISMISS -> {
+                NotificationManagerCompat.from(context).cancel(notificationId)
+            }
         }
-        NotificationManagerCompat.from(context).cancel(notificationId)
     }
 
     private fun vibrate(context: Context) {

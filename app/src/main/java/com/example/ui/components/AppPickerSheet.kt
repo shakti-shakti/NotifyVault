@@ -64,6 +64,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.AppInfoResolver
 import com.example.ui.theme.AurumPalette
 import com.example.ui.theme.DisplayM
 import com.example.ui.theme.EmeraldPalette
@@ -635,7 +636,10 @@ private fun loadInstalledApps(context: Context): List<InstalledAppItem> {
         return InstalledAppItem(
             packageName = packageName,
             appName = label,
-            isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
+            iconPath = runCatching {
+                AppInfoResolver.saveDrawableToFile(context, packageName, pm.getApplicationIcon(appInfo))
+            }.getOrNull()
         )
     }
 

@@ -3,6 +3,7 @@ package com.example.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.ComponentName
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
@@ -29,18 +30,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.ConcurrentHashMap
 
 class NotifyVaultNotificationListenerService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val processingMutex = Mutex()
-    private val lastOtpBySource = ConcurrentHashMap<String, Pair<String, Long>>()
     private lateinit var database: VaultDatabase
     private lateinit var deduper: NotificationDeduper
     private lateinit var otpNotifier: OtpNotifier
     private lateinit var otpPreferences: OtpCatcherPreferences
     private lateinit var featurePreferences: NotificationFeaturePreferences
     private val liveRegistry = LiveNotificationRegistry.getInstance()
+    @Volatile private var listenerConnected = false
 
     override fun onCreate() {
         super.onCreate()
@@ -61,6 +61,7 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
 
     override fun onDestroy() {
         liveRegistry.clear()
+        listenerConnected = false
         serviceScope.cancel()
         if (instance == this) instance = null
         super.onDestroy()
@@ -68,11 +69,13 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        listenerConnected = true
         startCaptureForeground()
         rescanActiveNotifications()
     }
 
     override fun onListenerDisconnected() {
+        listenerConnected = false
         liveRegistry.clear()
         super.onListenerDisconnected()
     }
@@ -80,10 +83,18 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null || sbn.packageName == applicationContext.packageName) return
         super.onNotificationPosted(sbn)
-        processStatusBarNotification(sbn)
+        enqueueNotification(sbn)
     }
 
-    private fun processStatusBarNotification(sbn: StatusBarNotification) {
+    private fun enqueueNotification(sbn: StatusBarNotification) {
+        serviceScope.launch {
+            processingMutex.withLock {
+                processStatusBarNotification(sbn)
+            }
+        }
+    }
+
+    private suspend fun processStatusBarNotification(sbn: StatusBarNotification) {
         val pkgName = sbn.packageName
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: Bundle()
@@ -244,6 +255,11 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
             category = if (otpMatch != null) "OTP" else baseEntity.category
         )
 
+        // OTP delivery is independent from archive deduplication. This keeps
+        // the alert immediate even when Room is busy or capture rules exclude
+        // the source notification.
+        otpMatch?.let { maybeNotifyOtp(it) }
+
         val excludeRules = com.example.data.ExcludeRulesRepository.getInstance(applicationContext)
         val excludeReason = excludeRules.shouldExclude(
             packageName = pkgName,
@@ -256,77 +272,70 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
             priority = notification.priority
         )
         if (excludeReason != null) {
-            if (otpMatch != null && otpPreferences.catchExcluded.value) maybeNotifyOtp(otpMatch)
             return
         }
 
-        serviceScope.launch {
-            processingMutex.withLock {
-                try {
-                    val start = System.nanoTime()
-                    val decision = deduper.decide(fingerprint)
-                    val effectiveDecision =
-                        if (decision == DedupDecision.UpdateExisting && featurePreferences.showUpdatesSeparately.value) {
-                            DedupDecision.InsertNew
-                        } else decision
-                    when (effectiveDecision) {
-                        DedupDecision.InsertNew -> {
-                            val storedLink = extractedLink
-                            database.notificationDao().insert(
-                                parsedEntity.copy(
-                                    deepLinkUri = storedLink?.uri,
-                                    deepLinkSource = storedLink?.source?.name,
-                                    deepLinkConfidence = storedLink?.confidence?.name
-                                )
-                            )
-                            otpMatch?.let { maybeNotifyOtp(it) }
-                        }
-                        DedupDecision.UpdateExisting -> {
-                            val existing = deduper.existing(fingerprint)
-                            if (existing == null) {
-                                database.notificationDao().insert(parsedEntity)
-                            } else {
-                                database.notificationDao().insertHistory(
-                                    NotificationHistoryEntity(
-                                        parentId = existing.id,
-                                        previousTitle = existing.title,
-                                        previousText = existing.text,
-                                        previousContentHash = existing.contentHash,
-                                        replacedAt = fingerprint.updateTime
-                                    )
-                                )
-                                database.notificationDao().update(
-                                    parsedEntity.copy(
-                                        id = existing.id,
-                                        deepLinkUri = if (extractedLink?.confidence == com.example.data.LinkConfidence.HIGH) {
-                                            extractedLink.uri
-                                        } else existing.deepLinkUri,
-                                        deepLinkSource = if (extractedLink?.confidence == com.example.data.LinkConfidence.HIGH) {
-                                            extractedLink.source?.name
-                                        } else existing.deepLinkSource,
-                                        deepLinkConfidence = if (extractedLink?.confidence == com.example.data.LinkConfidence.HIGH) {
-                                            extractedLink.confidence.name
-                                        } else existing.deepLinkConfidence,
-                                        isStarred = existing.isStarred,
-                                        isArchived = existing.isArchived,
-                                        isRead = existing.isRead,
-                                        updateCount = existing.updateCount + 1,
-                                        isUpdate = true,
-                                        captureTime = fingerprint.updateTime,
-                                        lastSeenAt = fingerprint.updateTime
-                                    )
-                                )
-                                otpMatch?.let { maybeNotifyOtp(it) }
-                            }
-                        }
-                        DedupDecision.SkipDuplicate -> Unit
-                    }
-                    val elapsedMs = (System.nanoTime() - start) / 1_000_000
-                    if (elapsedMs > 50) android.util.Log.w(TAG, "Notification DB path took ${elapsedMs}ms")
-                } catch (error: Exception) {
-                    android.util.Log.e(TAG, "Unable to archive notification", error)
+        try {
+            val start = System.nanoTime()
+            val decision = deduper.decide(fingerprint)
+            val effectiveDecision =
+                if (decision == DedupDecision.UpdateExisting && featurePreferences.showUpdatesSeparately.value) {
+                    DedupDecision.InsertNew
+                } else decision
+            when (effectiveDecision) {
+                DedupDecision.InsertNew -> {
+                    val storedLink = extractedLink
+                    database.notificationDao().insert(
+                        parsedEntity.copy(
+                            deepLinkUri = storedLink?.uri,
+                            deepLinkSource = storedLink?.source?.name,
+                            deepLinkConfidence = storedLink?.confidence?.name
+                        )
+                    )
                 }
+                DedupDecision.UpdateExisting -> {
+                    val existing = deduper.existing(fingerprint)
+                    if (existing == null) {
+                        database.notificationDao().insert(parsedEntity)
+                    } else {
+                        database.notificationDao().insertHistory(
+                            NotificationHistoryEntity(
+                                parentId = existing.id,
+                                previousTitle = existing.title,
+                                previousText = existing.text,
+                                previousContentHash = existing.contentHash,
+                                replacedAt = fingerprint.updateTime
+                            )
+                        )
+                        database.notificationDao().update(
+                            parsedEntity.copy(
+                                id = existing.id,
+                                deepLinkUri = if (extractedLink?.confidence == com.example.data.LinkConfidence.HIGH) {
+                                    extractedLink.uri
+                                } else existing.deepLinkUri,
+                                deepLinkSource = if (extractedLink?.confidence == com.example.data.LinkConfidence.HIGH) {
+                                    extractedLink.source?.name
+                                } else existing.deepLinkSource,
+                                deepLinkConfidence = if (extractedLink?.confidence == com.example.data.LinkConfidence.HIGH) {
+                                    extractedLink.confidence.name
+                                } else existing.deepLinkConfidence,
+                                isStarred = existing.isStarred,
+                                isArchived = existing.isArchived,
+                                isRead = existing.isRead,
+                                updateCount = existing.updateCount + 1,
+                                isUpdate = true,
+                                captureTime = fingerprint.updateTime,
+                                lastSeenAt = fingerprint.updateTime
+                            )
+                        )
+                    }
+                }
+                DedupDecision.SkipDuplicate -> Unit
             }
+            val elapsedMs = (System.nanoTime() - start) / 1_000_000
+            if (elapsedMs > 50) android.util.Log.w(TAG, "Notification DB path took ${elapsedMs}ms")
+        } catch (error: Exception) {
+            android.util.Log.e(TAG, "Unable to archive notification", error)
         }
     }
 
@@ -335,10 +344,7 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
         if (match.sourcePackage in otpPreferences.excludedPackages.value && !otpPreferences.catchExcluded.value) return
         val selected = otpPreferences.selectedPackages.value
         if (selected.isNotEmpty() && match.sourcePackage !in selected) return
-        val now = System.currentTimeMillis()
-        val previous = lastOtpBySource[match.sourcePackage]
-        if (previous != null && previous.first == match.code && now - previous.second < 60_000L) return
-        lastOtpBySource[match.sourcePackage] = match.code to now
+        if (!otpPreferences.claimOtpDelivery(match.sourcePackage, match.code)) return
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
         val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NotifyVault:OtpDelivery")
@@ -401,10 +407,20 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
         fun rescanActiveNotifications() {
             runCatching {
                 val service = instance ?: return
-                service.activeNotifications?.forEach(service::processStatusBarNotification)
+                service.activeNotifications?.forEach(service::enqueueNotification)
             }
         }
 
-        fun isConnected(): Boolean = instance != null
+        fun isConnected(): Boolean = instance?.listenerConnected == true
+
+        fun requestRebind(context: Context) {
+            runCatching {
+                NotificationListenerService.requestRebind(
+                    ComponentName(context, NotifyVaultNotificationListenerService::class.java)
+                )
+            }.onFailure {
+                android.util.Log.w(TAG, "Unable to request listener rebind", it)
+            }
+        }
     }
 }

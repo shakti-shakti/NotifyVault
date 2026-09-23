@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 
 data class OtpLogEntry(
     val sourceApp: String,
@@ -53,6 +54,34 @@ class OtpCatcherPreferences private constructor(context: Context) {
     fun setSelectedPackages(value: Set<String>) { saveSet(KEY_SELECTED, value); _selectedPackages.value = value }
     fun setExcludedPackages(value: Set<String>) { saveSet(KEY_EXCLUDED, value); _excludedPackages.value = value }
 
+    /**
+     * Claims delivery for a source/code pair before showing our notification.
+     *
+     * This is persisted so a listener process restart cannot replay the same
+     * OTP that Android reposted while the app was not running.
+     */
+    @Synchronized
+    fun claimOtpDelivery(sourcePackage: String, code: String, now: Long = System.currentTimeMillis()): Boolean {
+        val deliveryKey = sha256("$sourcePackage\u0000$code")
+        val deliveries = runCatching {
+            JSONObject(prefs.getString(KEY_DELIVERY_STATE, "{}").orEmpty())
+        }.getOrDefault(JSONObject())
+        val previousTime = deliveries.optLong(deliveryKey, 0L)
+        if (now >= previousTime && now - previousTime < OTP_DELIVERY_DEDUP_WINDOW_MS) {
+            return false
+        }
+        val iterator = deliveries.keys()
+        while (iterator.hasNext()) {
+            val key = iterator.next()
+            if (now - deliveries.optLong(key, now) >= OTP_DELIVERY_DEDUP_WINDOW_MS) {
+                iterator.remove()
+            }
+        }
+        deliveries.put(deliveryKey, now)
+        prefs.edit().putString(KEY_DELIVERY_STATE, deliveries.toString()).commit()
+        return true
+    }
+
     fun addOtpLog(sourceApp: String, sourcePackage: String, code: String) {
         val next = (listOf(OtpLogEntry(sourceApp, sourcePackage, mask(code), System.currentTimeMillis())) + _otpLog.value).take(20)
         val json = JSONArray().apply {
@@ -85,12 +114,19 @@ class OtpCatcherPreferences private constructor(context: Context) {
         }
     }.getOrDefault(emptyList())
 
+    private fun sha256(value: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+
     companion object {
         private const val KEY_ENABLED = "enabled"; private const val KEY_EMOJI = "emoji"
         private const val KEY_COPY_APP = "copy_app"; private const val KEY_TIMEOUT = "timeout"
         private const val KEY_SOUND = "sound"; private const val KEY_SOUND_URI = "sound_uri"; private const val KEY_VIBRATION = "vibration"
         private const val KEY_LOCKSCREEN = "lockscreen"; private const val KEY_CATCH_EXCLUDED = "catch_excluded"
         private const val KEY_SELECTED = "selected"; private const val KEY_EXCLUDED = "excluded"; private const val KEY_LOG = "log"
+        private const val KEY_DELIVERY_STATE = "delivery_state"
+        private const val OTP_DELIVERY_DEDUP_WINDOW_MS = 60_000L
         @Volatile private var instance: OtpCatcherPreferences? = null
         fun getInstance(context: Context): OtpCatcherPreferences =
             instance ?: synchronized(this) {

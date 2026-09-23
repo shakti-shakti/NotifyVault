@@ -100,7 +100,15 @@ class OtpNotifier(private val context: Context) {
         return try {
             val icon = context.packageManager.getApplicationIcon(packageName)
             val drawable = icon as? BitmapDrawable
-            drawable?.bitmap
+            if (drawable != null) return drawable.bitmap
+            val width = icon.intrinsicWidth.takeIf { it > 0 } ?: 96
+            val height = icon.intrinsicHeight.takeIf { it > 0 } ?: 96
+            Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                android.graphics.Canvas(bitmap).also { canvas ->
+                    icon.setBounds(0, 0, canvas.width, canvas.height)
+                    icon.draw(canvas)
+                }
+            }
         } catch (_: Exception) {
             null
         }
