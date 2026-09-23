@@ -375,7 +375,7 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
     private fun startCaptureForeground() {
         try {
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(com.example.R.drawable.ic_otp_lock)
+                .setSmallIcon(com.example.R.drawable.notifyvault_app_icon)
                 .setContentTitle("NotifyVault is active")
                 .setContentText("Private notification capture is running")
                 .setPriority(NotificationCompat.PRIORITY_MIN)

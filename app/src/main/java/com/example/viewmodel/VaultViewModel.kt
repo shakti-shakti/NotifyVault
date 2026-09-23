@@ -511,7 +511,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
         val randomOtp = (100000..999999).random()
         val notification = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.notifyvault_app_icon)
             .setContentTitle("Real-Time Verification: OTP $randomOtp")
             .setContentText("Your OTP code is $randomOtp. Captured live from Android status bar.")
             .setStyle(NotificationCompat.BigTextStyle().bigText("Your one-time passcode is $randomOtp. This real alert was issued by Android system and archived in real time by NotifyVault."))

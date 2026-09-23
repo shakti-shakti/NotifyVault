@@ -2,3 +2,4 @@
 - [Android build tooling](android-build-tooling.md) — Check wrapper and AGP compatibility before relying on local Gradle verification.
 - [Notification capture pipeline](notification-capture-pipeline.md) — Deduplication is serialized before OTP delivery; vault history is persistent while OTP logs remain ephemeral.
 - [Navigation back stack](navigation-back-stack.md) — Top-level tabs reset to their root; nested screens and modal sheets consume system back before the activity exits.
+- [App icon branding](app-icon-branding.md) — Keep the supplied NotifyVault PNG byte-for-byte transparent across launcher and owned notification icons; preserve source-app icons.
