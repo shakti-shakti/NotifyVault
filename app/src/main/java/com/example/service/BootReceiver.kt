@@ -22,7 +22,6 @@ class BootReceiver : BroadcastReceiver() {
             // done before reconnecting the listener so no vault UI can reopen
             // unlocked after the device restarts.
             LockManager.getInstance(context).lock()
-            com.example.data.OtpCatcherPreferences.getInstance(context).clearLog()
             WorkManager.getInstance(context).enqueueUniqueWork(
                 "notifyvault_listener_bootstrap",
                 ExistingWorkPolicy.REPLACE,

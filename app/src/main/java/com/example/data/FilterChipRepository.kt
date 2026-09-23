@@ -37,7 +37,9 @@ class FilterChipRepository private constructor(context: Context) {
     val quickChipPackages: StateFlow<List<String>> = _quickChipPackages.asStateFlow()
 
     // Temporary active quick chip (single app filter from the app grid button)
-    private val _temporaryQuickChip = MutableStateFlow<String?>(null)
+    private val _temporaryQuickChip = MutableStateFlow<String?>(
+        prefs.getString(KEY_TEMPORARY_QUICK_CHIP, null)
+    )
     val temporaryQuickChip: StateFlow<String?> = _temporaryQuickChip.asStateFlow()
 
     // Has user completed initial quick-chip selection setup?
@@ -223,20 +225,20 @@ class FilterChipRepository private constructor(context: Context) {
     fun removeQuickChip(pkg: String) {
         val current = _quickChipPackages.value.filter { it != pkg }
         setQuickChips(current)
-        if (_temporaryQuickChip.value == pkg) {
-            _temporaryQuickChip.value = null
-        }
+        if (_temporaryQuickChip.value == pkg) setTemporaryQuickChip(null)
     }
 
     fun setTemporaryQuickChip(pkg: String?) {
+        prefs.edit().apply {
+            if (pkg == null) remove(KEY_TEMPORARY_QUICK_CHIP)
+            else putString(KEY_TEMPORARY_QUICK_CHIP, pkg)
+        }.apply()
         _temporaryQuickChip.value = pkg
     }
 
     fun pinTemporaryQuickChip(pkg: String) {
         addQuickChip(pkg)
-        if (_temporaryQuickChip.value == pkg) {
-            _temporaryQuickChip.value = null
-        }
+        if (_temporaryQuickChip.value == pkg) setTemporaryQuickChip(null)
     }
 
     private fun loadQuickChips(): List<String> {
@@ -256,6 +258,7 @@ class FilterChipRepository private constructor(context: Context) {
     companion object {
         private const val KEY_CUSTOM_CHIPS = "key_custom_chips"
         private const val KEY_QUICK_CHIPS = "key_quick_chips"
+        private const val KEY_TEMPORARY_QUICK_CHIP = "key_temporary_quick_chip"
         private const val KEY_QUICK_SETUP_DONE = "key_quick_setup_done"
         private const val KEY_HIDDEN_BUILT_INS = "key_hidden_built_ins"
 

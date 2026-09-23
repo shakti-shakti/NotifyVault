@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "rHTZAElCnDFSGtRNbYDAH"
+uri = "file://output/NotifyVault-release.apk"
+type = "unspecified"
+title = "NotifyVault signed release APK"
+description = "Standalone signed release APK. Built successfully, verified with APK Signature Scheme v2, and synced from the release output."
+logical_id = "2cacb0e2-a7ca-4c6b-8f75-3d4f572e1d9a"
+content_hash = "sha256:94930f015ce69e813830d4a1a78b60d1480ad3c06babb51e26877b1ecca827d8"
+size = 14860068
+mtime_ms = 1790199690810
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:4cf2539d-6a5b-4998-a9e9-fbdd91d79ea6/2cacb0e2-a7ca-4c6b-8f75-3d4f572e1d9a/f16fc435-f4f4-46cb-a645-157d80a9c123"
+storage_version_token = "1790199711404031"
+content_type = "application/octet-stream"

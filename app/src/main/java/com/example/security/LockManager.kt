@@ -142,7 +142,6 @@ class LockManager(private val context: Context) {
     fun lock() {
         if (isLockConfigured()) {
             _isLocked.value = true
-            com.example.data.OtpCatcherPreferences.getInstance(context).clearLog()
         }
     }
 

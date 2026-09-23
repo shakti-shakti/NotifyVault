@@ -419,7 +419,8 @@ fun SettingsScreen(
                                 Text("Auto-Lock Timeout", style = VaultBodyM.copy(color = colors.textPrimary, fontSize = 13.sp))
                                 Text("Lock vault when inactive in background", style = VaultCaption.copy(color = colors.textTertiary, fontSize = 10.sp))
                             }
-                            Box {
+                            if (lockMethod != LockMethod.NONE) {
+                                Box {
                                 val timeoutLabels = mapOf(
                                     0L to "Immediately",
                                     15_000L to "15s",
@@ -456,6 +457,7 @@ fun SettingsScreen(
                                         )
                                     }
                                 }
+                            }
                             } else {
                                 Text(
                                     text = "Enable",

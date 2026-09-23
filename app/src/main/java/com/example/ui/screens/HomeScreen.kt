@@ -646,7 +646,6 @@ fun HomeScreen(
 
                         }
                     }
-                }
 
                 // Section Title with sticky count
                 item {

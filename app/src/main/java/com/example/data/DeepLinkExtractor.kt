@@ -34,6 +34,8 @@ data class ExtractedLink(
  * analytics beacons for content links.
  */
 object DeepLinkExtractor {
+    private const val EXTRA_LINK_URI_KEY = "android.linkUri"
+
     private val appSchemes = setOf(
         "whatsapp", "tg", "instagram", "fb", "twitter", "x", "linkedin",
         "slack", "discord", "spotify", "youtube", "gmail", "googlegmail",
@@ -61,8 +63,8 @@ object DeepLinkExtractor {
         val extras = notification.extras ?: Bundle()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val explicit = extras.getString(Notification.EXTRA_LINK_URI)
-                ?: extras.getCharSequence(Notification.EXTRA_LINK_URI)?.toString()
+            val explicit = extras.getString(EXTRA_LINK_URI_KEY)
+                ?: extras.getCharSequence(EXTRA_LINK_URI_KEY)?.toString()
             if (!explicit.isNullOrBlank()) {
                 return ExtractedLink(explicit, LinkSource.EXTRA_LINK_URI, LinkConfidence.HIGH)
             }

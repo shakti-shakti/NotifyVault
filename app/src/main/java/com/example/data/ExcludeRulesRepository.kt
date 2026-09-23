@@ -90,8 +90,8 @@ class ExcludeRulesRepository private constructor(private val context: Context) {
     private val _excludedTodayCount = MutableStateFlow(getExcludedTodayCountInternal())
     val excludedTodayCount: StateFlow<Int> = _excludedTodayCount.asStateFlow()
 
-    // Recent exclusion logs (in memory, up to 50 items)
-    private val _recentExclusions = MutableStateFlow<List<ExcludedNotificationLogItem>>(emptyList())
+    // Recent exclusion logs are persisted locally, up to 50 items.
+    private val _recentExclusions = MutableStateFlow(loadRecentExclusions())
     val recentExclusions: StateFlow<List<ExcludedNotificationLogItem>> = _recentExclusions.asStateFlow()
 
     // Recent notification cache for repeat duplicate detection (key = packageName:title:text -> timestamp)
@@ -397,8 +397,44 @@ class ExcludeRulesRepository private constructor(private val context: Context) {
         if (currentLogs.size > 50) {
             currentLogs.removeAt(currentLogs.size - 1)
         }
+        saveRecentExclusions(currentLogs)
         _recentExclusions.value = currentLogs
         return reason
+    }
+
+    private fun saveRecentExclusions(items: List<ExcludedNotificationLogItem>) {
+        val array = JSONArray()
+        items.forEach { item ->
+            array.put(JSONObject().apply {
+                put("timestamp", item.timestamp)
+                put("appName", item.appName)
+                put("packageName", item.packageName)
+                put("title", item.title)
+                put("reason", item.reason)
+            })
+        }
+        prefs.edit().putString(KEY_RECENT_EXCLUSIONS, array.toString()).apply()
+    }
+
+    private fun loadRecentExclusions(): List<ExcludedNotificationLogItem> {
+        val json = prefs.getString(KEY_RECENT_EXCLUSIONS, null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(json)
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.getJSONObject(index)
+                    add(
+                        ExcludedNotificationLogItem(
+                            timestamp = item.optLong("timestamp"),
+                            appName = item.optString("appName"),
+                            packageName = item.optString("packageName"),
+                            title = item.optString("title"),
+                            reason = item.optString("reason")
+                        )
+                    )
+                }
+            }.take(50)
+        }.getOrDefault(emptyList())
     }
 
     private fun getExcludedTodayCountInternal(): Int {
@@ -433,6 +469,7 @@ class ExcludeRulesRepository private constructor(private val context: Context) {
         private const val KEY_EXCLUDE_ONGOING = "key_exclude_ongoing"
         private const val KEY_EXCLUDE_MEDIA = "key_exclude_media"
         private const val KEY_EXCLUDE_SYSTEM = "key_exclude_system"
+        private const val KEY_RECENT_EXCLUSIONS = "key_recent_exclusions"
 
         @Volatile
         private var instance: ExcludeRulesRepository? = null

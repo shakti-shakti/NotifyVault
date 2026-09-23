@@ -76,7 +76,9 @@ class NotificationRepository(private val dao: NotificationDao) {
             if (OTP_KEYWORD_REGEX.matcher(fullContent).find()) {
                 val matches = OTP_REGEX.matcher(fullContent)
                 val candidates = mutableListOf<String>()
-                while (matches.find()) candidates += matches.group(1)
+                while (matches.find()) {
+                    matches.group(1)?.let { candidates += it }
+                }
                 val detected = candidates.firstOrNull { it.length == 6 }
                     ?: candidates.firstOrNull { it.length == 8 }
                     ?: candidates.firstOrNull { it.length == 4 }

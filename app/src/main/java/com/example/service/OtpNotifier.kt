@@ -99,7 +99,7 @@ class OtpNotifier(private val context: Context) {
     private fun loadSourceIcon(packageName: String, appName: String): Bitmap? {
         return try {
             val icon = context.packageManager.getApplicationIcon(packageName)
-            val drawable = icon.loadDrawable(context) as? BitmapDrawable
+            val drawable = icon as? BitmapDrawable
             drawable?.bitmap
         } catch (_: Exception) {
             null

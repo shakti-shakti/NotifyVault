@@ -2,6 +2,7 @@ package com.example.service
 
 import android.app.Notification
 import android.app.PendingIntent
+import android.os.Parcel
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -97,7 +98,7 @@ class LiveNotificationRegistry private constructor() {
             "$packageName|$notificationId|${tag.orEmpty()}"
 
         fun fromStatusBarNotification(sbn: StatusBarNotification): LiveEntry {
-            val notification = Notification(sbn.notification)
+            val notification = copyNotification(sbn.notification)
             try {
                 notification.extras?.apply {
                     remove(Notification.EXTRA_LARGE_ICON)
@@ -122,6 +123,17 @@ class LiveNotificationRegistry private constructor() {
                 },
                 fullNotification = notification
             )
+        }
+
+        private fun copyNotification(source: Notification): Notification {
+            val parcel = Parcel.obtain()
+            return try {
+                source.writeToParcel(parcel, 0)
+                parcel.setDataPosition(0)
+                Notification.CREATOR.createFromParcel(parcel)
+            } finally {
+                parcel.recycle()
+            }
         }
     }
 }

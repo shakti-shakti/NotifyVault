@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryChargingFull
@@ -188,7 +187,7 @@ fun FeaturePackSettings(viewModelFeaturePreferences: NotificationFeaturePreferen
                         }
                     }
                 } else {
-                    Text("OTP history is empty. It clears automatically when the vault locks.", style = VaultCaption.copy(color = colors.textTertiary))
+                    Text("OTP history is empty. New caught codes are stored locally in the vault.", style = VaultCaption.copy(color = colors.textTertiary))
                 }
             }
         }

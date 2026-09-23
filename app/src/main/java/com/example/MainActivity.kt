@@ -30,7 +30,6 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.ContextCompat
-import androidx.activity.result.contract.ActivityResultContracts
 import com.example.data.FilterChipRepository
 import com.example.ui.components.AppPickerMode
 import com.example.ui.components.AppPickerSheet
@@ -54,9 +53,6 @@ import com.example.ui.theme.rememberVaultCustomizationState
 import com.example.viewmodel.VaultViewModel
 
 class MainActivity : ComponentActivity() {
-    private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -64,7 +60,10 @@ class MainActivity : ComponentActivity() {
             android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            requestPermissions(
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                POST_NOTIFICATIONS_REQUEST_CODE
+            )
         }
         setContent {
             val customizationState = rememberVaultCustomizationState()
@@ -76,6 +75,10 @@ class MainActivity : ComponentActivity() {
                 NotifyVaultApp(viewModel = viewModel)
             }
         }
+    }
+
+    companion object {
+        private const val POST_NOTIFICATIONS_REQUEST_CODE = 7001
     }
 }
 
@@ -95,6 +98,7 @@ fun NotifyVaultApp(
     var currentRoute by remember { mutableStateOf("vault") }
     var selectedNotificationId by remember { mutableLongStateOf(1L) }
     var isOnboardingCompleted by remember { mutableStateOf(true) }
+    val isTopLevelRoute = currentRoute in setOf("vault", "search", "insights", "studio")
 
     // Dynamically apply or remove FLAG_SECURE
     DisposableEffect(isSecureRecents) {

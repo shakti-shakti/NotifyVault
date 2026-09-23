@@ -9,9 +9,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.junit.runner.RunWith
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class ReplayEngineTest {
     private lateinit var context: android.content.Context
     private lateinit var registry: LiveNotificationRegistry
