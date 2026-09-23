@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
@@ -153,27 +154,9 @@ fun AppPickerSheet(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(context) {
         try {
-            val list = withContext(Dispatchers.IO) {
-                val pm = context.packageManager
-                pm.getInstalledApplications(PackageManager.GET_META_DATA)
-                    .asSequence()
-                    .map { appInfo ->
-                        val pkg = appInfo.packageName
-                        val label = runCatching { pm.getApplicationLabel(appInfo).toString() }
-                            .getOrDefault(pkg)
-                            .ifBlank { pkg }
-                        InstalledAppItem(
-                            packageName = pkg,
-                            appName = label,
-                            isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                        )
-                    }
-                    .distinctBy { it.packageName }
-                    .sortedBy { it.appName.lowercase() }
-                    .toList()
-            }
+            val list = withContext(Dispatchers.IO) { loadInstalledApps(context) }
             allApps.clear()
             allApps.addAll(list)
         } catch (error: Exception) {
@@ -183,21 +166,21 @@ fun AppPickerSheet(
         }
     }
 
-    val filteredApps = remember(allApps, searchQuery, selectedTab) {
-        allApps.filter { app ->
-            val matchesTab = when (selectedTab) {
-                AppPickerFilterTab.ALL -> true
-                AppPickerFilterTab.USER -> !app.isSystemApp
-                AppPickerFilterTab.SYSTEM -> app.isSystemApp
-            }
-            val matchesSearch = if (searchQuery.isBlank()) {
-                true
-            } else {
-                app.appName.contains(searchQuery, ignoreCase = true) ||
-                        app.packageName.contains(searchQuery, ignoreCase = true)
-            }
-            matchesTab && matchesSearch
+    // Read the snapshot list directly instead of memoizing against its stable
+    // list identity. This ensures the UI renders as soon as the IO load ends.
+    val filteredApps = allApps.filter { app ->
+        val matchesTab = when (selectedTab) {
+            AppPickerFilterTab.ALL -> true
+            AppPickerFilterTab.USER -> !app.isSystemApp
+            AppPickerFilterTab.SYSTEM -> app.isSystemApp
         }
+        val matchesSearch = if (searchQuery.isBlank()) {
+            true
+        } else {
+            app.appName.contains(searchQuery, ignoreCase = true) ||
+                    app.packageName.contains(searchQuery, ignoreCase = true)
+            }
+        matchesTab && matchesSearch
     }
 
     AmbientMeshBackground(modifier = modifier) {
@@ -639,6 +622,49 @@ fun AppPickerSheet(
             }
         }
     }
+}
+
+private fun loadInstalledApps(context: Context): List<InstalledAppItem> {
+    val pm = context.packageManager
+
+    fun toItem(appInfo: ApplicationInfo): InstalledAppItem {
+        val packageName = appInfo.packageName
+        val label = runCatching { pm.getApplicationLabel(appInfo).toString() }
+            .getOrDefault(packageName)
+            .ifBlank { packageName }
+        return InstalledAppItem(
+            packageName = packageName,
+            appName = label,
+            isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+        )
+    }
+
+    val installed = runCatching {
+        pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            .asSequence()
+            .map(::toItem)
+            .toList()
+    }.getOrDefault(emptyList())
+
+    // Some Android builds and managed profiles restrict the broad package
+    // query even when QUERY_ALL_PACKAGES is declared. A launcher query still
+    // gives the user the apps they can actually open and select.
+    val launchable = if (installed.isNotEmpty()) {
+        emptyList()
+    } else {
+        runCatching {
+            val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            pm.queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
+                .asSequence()
+                .map { it.activityInfo.applicationInfo }
+                .map(::toItem)
+                .toList()
+        }.getOrDefault(emptyList())
+    }
+
+    return (installed + launchable)
+        .distinctBy { it.packageName }
+        .sortedBy { it.appName.lowercase() }
 }
 
 @Composable

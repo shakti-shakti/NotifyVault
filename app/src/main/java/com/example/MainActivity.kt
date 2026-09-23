@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.Manifest
 import android.content.pm.PackageManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
@@ -30,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import com.example.data.FilterChipRepository
 import com.example.ui.components.AppPickerMode
 import com.example.ui.components.AppPickerSheet
@@ -52,7 +52,7 @@ import com.example.ui.theme.NotifyVaultTheme
 import com.example.ui.theme.rememberVaultCustomizationState
 import com.example.viewmodel.VaultViewModel
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

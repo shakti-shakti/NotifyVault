@@ -1,0 +1,61 @@
+Use this as the master command from the project root:
+
+```bash
+bash scripts/build-release.sh
+```
+
+For the current workspace:
+
+```bash
+cd /home/runner/workspace && bash scripts/build-release.sh
+```
+
+The script automatically:
+
+1. Detects an installed Java version.
+2. Uses Java 17+ if available.
+3. Downloads a local Java 17 toolchain if Java is missing or incompatible.
+4. Detects the Android SDK.
+5. Downloads Android command-line tools if missing.
+6. Installs or verifies:
+   - Android API 36
+   - Android build-tools 36.0.0
+   - Android platform-tools
+7. Accepts Android SDK licenses.
+8. Creates `local.properties`.
+9. Runs all tests.
+10. Builds the signed release APK.
+11. Copies the APK to:
+
+```text
+output/NotifyVault-release.apk
+```
+
+12. Verifies the APK signature with `apksigner`.
+13. Runs `git diff --check`.
+
+The toolchains are cached locally at:
+
+```text
+~/.cache/notifyvault/
+```
+
+You can override that location:
+
+```bash
+NOTIFYVAULT_TOOLCHAIN_DIR=/some/cache/path bash scripts/build-release.sh
+```
+
+If you already know the SDK location, you can use:
+
+```bash
+ANDROID_SDK_ROOT=/tmp/android-sdk bash scripts/build-release.sh
+```
+
+The only item the script cannot safely generate automatically is the release signing identity. The project currently uses `my-release-key.jks`. If using another keystore:
+
+```bash
+KEYSTORE_PATH=/absolute/path/to/my-release-key.jks bash scripts/build-release.sh
+```
+
+I ran the master command successfully. It completed tests, release build, APK syncing, and APK Signature Scheme v2 verification.

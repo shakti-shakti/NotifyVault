@@ -163,10 +163,13 @@ object DeepLinkExtractor {
             if (blockedHosts.any { hostAndPath.contains(it) }) return false
             if (blockedExtensions.any { hostAndPath.substringBefore('?').endsWith(it) }) return false
             if (hostAndPath.contains("favicon")) return false
-            val path = uri.path.orEmpty().lowercase(Locale.ROOT)
-            val hasContentPath = contentSegments.any { path.contains(it) }
-            return hasContentPath || !uri.query.isNullOrBlank() || path.count { it == '/' } > 1
+            // Notification links are often short paths such as /verify or
+            // /open. Rejecting those made valid app/browser destinations
+            // impossible to replay from the vault.
+            return uri.host?.isNotBlank() == true
         }
-        return scheme in appSchemes || scheme == packageName.lowercase(Locale.ROOT)
+        return scheme in appSchemes ||
+                scheme == packageName.lowercase(Locale.ROOT) ||
+                scheme in setOf("mailto", "tel", "sms", "geo")
     }
 }

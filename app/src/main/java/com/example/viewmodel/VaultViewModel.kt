@@ -461,7 +461,6 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     fun lockVault() {
         _isVaultLocked.value = true
-        com.example.data.OtpCatcherPreferences.getInstance(getApplication()).clearLog()
     }
 
     fun unlockVault() {

@@ -60,12 +60,22 @@ class ReplayEngine internal constructor(
         } == true
 
     private fun replayDeepLink(entity: NotificationEntity): ReplayResult? {
-        val uri = entity.deepLinkUri ?: return null
+        val uri = entity.deepLinkUri ?: entity.linkUrl ?: return null
         return try {
-            val scoped = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .setPackage(entity.packageName)
-            context.startActivity(scoped)
+            val intent = if (uri.startsWith("intent://", ignoreCase = true)) {
+                Intent.parseUri(uri, Intent.URI_INTENT_SCHEME)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .also { parsed ->
+                        if (parsed.`package`.isNullOrBlank()) {
+                            parsed.setPackage(entity.packageName)
+                        }
+                    }
+            } else {
+                Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .setPackage(entity.packageName)
+            }
+            context.startActivity(intent)
             ReplayResult.DeepLinkReplay
         } catch (_: ActivityNotFoundException) {
             try {
