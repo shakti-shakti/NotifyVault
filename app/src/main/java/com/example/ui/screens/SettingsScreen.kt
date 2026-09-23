@@ -68,6 +68,7 @@ import com.example.security.LockManager
 import com.example.security.LockMethod
 import com.example.ui.components.AmbientMeshBackground
 import com.example.ui.components.GlassCard
+import com.example.ui.components.instantTap
 import com.example.ui.components.PrimaryPillButton
 import com.example.ui.theme.CrimsonPalette
 import com.example.ui.theme.DisplayM
@@ -87,6 +88,7 @@ fun SettingsScreen(
     viewModel: VaultViewModel,
     onBack: () -> Unit,
     onNavigateToExclusionRules: () -> Unit = {},
+    onNavigateToReplayDebug: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = LocalVaultColors.current
@@ -654,6 +656,10 @@ fun SettingsScreen(
             ) {
                 Text(
                     text = "NOTIFYVAULT",
+                    modifier = Modifier.instantTap(
+                        onLongClick = onNavigateToReplayDebug,
+                        onClick = {}
+                    ),
                     style = VaultLabel.copy(
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,

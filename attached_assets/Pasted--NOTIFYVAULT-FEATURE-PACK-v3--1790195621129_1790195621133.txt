@@ -1,0 +1,536 @@
+═══════════════════════════════════════════════════════════════════
+  NOTIFYVAULT — FEATURE PACK v3.2
+  "Best Effort Replay Engine"
+  Live PendingIntents + Deep Link Extraction + Smart Fallback
+═══════════════════════════════════════════════════════════════════
+
+Add a complete, production-grade "Best Effort Replay" system to
+NotifyVault. The goal: make our app reopen the EXACT same screen the
+original notification would have opened, for as long as technically
+possible — and degrade gracefully when it can't.
+
+We cannot match Android's own Notification History (it lives inside
+the system and keeps live PendingIntents in a private DB). But we
+CAN get very close with three pillars, all of which must be built
+now, in code, matching the Obsidian Glass design system.
+
+  PILLAR 1 — Extract & save deep links
+  PILLAR 2 — Live in-memory map of PendingIntents
+  PILLAR 3 — Smart fallback chain (ReplayEngine)
+
+Build all three. Then wire them into the UI honestly.
+
+
+═══════════════════════════════════════════════════════════════════
+  PILLAR 1 — DEEP LINK EXTRACTOR
+═══════════════════════════════════════════════════════════════════
+
+Create DeepLinkExtractor.kt.
+
+───────────────────────────────────────────────
+1.1  PUBLIC API
+───────────────────────────────────────────────
+
+  object DeepLinkExtractor {
+      fun extract(
+          notification: Notification,
+          packageName: String,
+          context: Context
+      ): ExtractedLink?
+  }
+
+  data class ExtractedLink(
+      val uri: String,
+      val source: LinkSource,
+      val confidence: LinkConfidence
+  )
+
+  enum class LinkSource {
+      EXTRA_LINK_URI,     // Notification.EXTRA_LINK_URI (Android 12+)
+      EXTRA_SCAN,         // Found by scanning all extras
+      CONTENT_INTENT,     // Found inside contentIntent's Intent data
+      ACTION_INTENT,      // Found inside an action's Intent data
+      LAUNCH_INTENT       // Found in the app's launch intent
+  }
+
+  enum class LinkConfidence { HIGH, MEDIUM, LOW }
+
+───────────────────────────────────────────────
+1.2  EXTRACTION ORDER (try in this exact order)
+───────────────────────────────────────────────
+
+  STEP 1 — Notification.EXTRA_LINK_URI
+    - Android 12+ sets this explicitly.
+    - If present and non-empty → HIGH confidence, return.
+
+  STEP 2 — Scan the entire extras Bundle
+    - Iterate every key in notification.extras.
+    - For each value, check if it is:
+        a) a String / CharSequence that parses as a URI
+        b) a Uri object
+        c) a Parcelable[] or ArrayList that contains Uris
+    - For each candidate, apply the MATCH RULES below.
+    - First match → MEDIUM confidence, return.
+
+  STEP 3 — contentIntent's Intent data
+    - Get notification.contentIntent.
+    - Reflectively extract the wrapped Intent (via PendingIntent
+      .getIntent() — if that fails, use the live map in Pillar 2).
+    - If intent.data != null → MEDIUM confidence, return.
+
+  STEP 4 — Action intents' data
+    - For each Notification.Action, get its actionIntent.
+    - Extract the wrapped Intent the same way.
+    - If intent.data != null → MEDIUM confidence, return.
+
+  STEP 5 — Launch intent fallback
+    - context.packageManager.getLaunchIntentForPackage(packageName)
+    - If it has a data URI → LOW confidence, return.
+
+  STEP 6 — Nothing found
+    - Return null.
+
+───────────────────────────────────────────────
+1.3  MATCH RULES (what counts as a deep link)
+───────────────────────────────────────────────
+
+  A string is a valid deep link if it matches ANY of:
+
+  a) Starts with "http://" or "https://"
+     → but filter out obvious noise:
+        - image URLs ending in .png/.jpg/.webp/.gif
+        - analytics/tracker URLs (google-analytics, doubleclick,
+          facebook.com/tr, adjust.com, branch.io trackers)
+        - favicon URLs
+        - fonts / css / js files
+     → keep only "content" URLs (message, article, post, item,
+       product, thread, chat, order)
+
+  b) Matches a known app deep-link scheme (whitelist):
+        whatsapp://
+        tg://
+        instagram://
+        fb://
+        twitter://
+        x://
+        linkedin://
+        slack://
+        discord://
+        spotify://
+        youtube://
+        gmail://
+        googlegmail://
+        upi://
+        paytmmp://
+        phonepe://
+        gpay://
+        amazon://
+        flipkart://
+        swiggy://
+        zomato://
+        and any scheme matching "<packageName>://"
+
+  c) Contains a path fragment that suggests deep content:
+        /message/     /chat/        /thread/
+        /item/        /post/        /article/
+        /product/     /order/       /tracking/
+        /receipt/     /payment/     /invoice/
+
+  d) Uses Android App Links format:
+        "android-app://<package>/..."
+        "intent://...#Intent;package=<package>;end"
+
+───────────────────────────────────────────────
+1.4  APPLY THE EXTRACTION
+───────────────────────────────────────────────
+
+  In NotificationListenerService.onNotificationPosted():
+    - After building the entity, call DeepLinkExtractor.extract().
+    - Store the result in NotificationEntity:
+        deepLinkUri: String?
+        deepLinkSource: String?   (LinkSource enum name)
+        deepLinkConfidence: String? (HIGH / MEDIUM / LOW)
+    - If a HIGH-confidence link already exists for the same
+      (packageName, groupKey), don't overwrite it with a weaker one.
+
+
+═══════════════════════════════════════════════════════════════════
+  PILLAR 2 — LIVE PENDINGINTENT MAP
+═══════════════════════════════════════════════════════════════════
+
+PendingIntents are NOT serializable. They cannot be saved to Room.
+They live only in memory. So we keep a thread-safe in-memory registry
+while the NotificationListenerService is running.
+
+───────────────────────────────────────────────
+2.1  LIVE NOTIFICATION REGISTRY
+───────────────────────────────────────────────
+
+Create LiveNotificationRegistry.kt as a Hilt @Singleton.
+
+  @Singleton
+  class LiveNotificationRegistry @Inject constructor() {
+
+      data class LiveEntry(
+          val key: String,               // StatusBarNotification key
+          val packageName: String,
+          val notificationId: Int,
+          val tag: String?,
+          val postedAt: Long,
+          val contentIntent: PendingIntent?,
+          val deleteIntent: PendingIntent?,
+          val actionIntents: List<ActionEntry>,
+          val fullNotification: Notification
+      )
+
+      data class ActionEntry(
+          val title: CharSequence,
+          val actionIntent: PendingIntent?
+      )
+
+      // Thread-safe, LRU-capped
+      private val map = ConcurrentHashMap<String, LiveEntry>()
+      private val accessOrder = Collections.synchronizedList(
+          LinkedList<String>()
+      )
+
+      private const val MAX_ENTRIES = 500
+
+      fun put(entry: LiveEntry) { ... evictOldest if over cap ... }
+      fun get(key: String): LiveEntry?
+      fun remove(key: String)
+      fun clear()
+      fun contains(key: String): Boolean
+      fun size(): Int
+  }
+
+  Requirements:
+    - Thread-safe reads/writes (ConcurrentHashMap).
+    - LRU eviction: when size > MAX_ENTRIES, drop the oldest
+      by postedAt.
+    - No memory leaks: entries hold references to Notification
+      objects which may hold bitmaps. To prevent OOM, strip large
+      bitmaps (EXTRA_LARGE_ICON, EXTRA_PICTURE) from the stored
+      Notification before inserting into the map. Keep only the
+      intents + light metadata.
+    - Map is empty after service restart — that is correct and
+      expected. ReplayEngine will fall back.
+
+───────────────────────────────────────────────
+2.2  WIRE INTO THE SERVICE
+───────────────────────────────────────────────
+
+  onNotificationPosted(sbn):
+    - Build a LiveEntry from sbn.notification.
+    - Strip heavy bitmaps first.
+    - registry.put(entry).
+
+  onNotificationRemoved(sbn):
+    - registry.remove(sbn.key).
+
+  onListenerDisconnected / onDestroy:
+    - registry.clear().
+
+  Expose the registry via Hilt so the UI layer can query it.
+
+───────────────────────────────────────────────
+2.3  GRACEFUL DEGRADATION
+───────────────────────────────────────────────
+
+  The UI must know in real time whether exact replay is possible.
+  Add a StateFlow<Set<String>> to the registry that emits the set
+  of live notification keys. The Detail screen collects this and
+  toggles the status pill live.
+
+  registry.liveKeys: StateFlow<Set<String>>
+
+
+═══════════════════════════════════════════════════════════════════
+  PILLAR 3 — REPLAY ENGINE (SMART FALLBACK CHAIN)
+═══════════════════════════════════════════════════════════════════
+
+Create ReplayEngine.kt. This is the brain that tries everything.
+
+───────────────────────────────────────────────
+3.1  RESULT TYPE
+───────────────────────────────────────────────
+
+  sealed class ReplayResult {
+      object ExactReplay      : ReplayResult()  // fired live contentIntent
+      object ActionReplay     : ReplayResult()  // fired a live actionIntent
+      object DeepLinkReplay   : ReplayResult()  // used stored deep link
+      object AppLaunch        : ReplayResult()  // opened app main activity
+      object AppDetails       : ReplayResult()  // opened settings page
+      object Failed           : ReplayResult()  // nothing worked
+  }
+
+───────────────────────────────────────────────
+3.2  PUBLIC API
+───────────────────────────────────────────────
+
+  @Singleton
+  class ReplayEngine @Inject constructor(
+      private val registry: LiveNotificationRegistry,
+      private val context: Context
+  ) {
+      fun replay(entity: NotificationEntity): ReplayResult
+      fun replayAction(
+          entity: NotificationEntity,
+          actionTitle: String
+      ): ReplayResult
+  }
+
+───────────────────────────────────────────────
+3.3  REPLAY FLOW (try in this exact order)
+───────────────────────────────────────────────
+
+  STEP 1 — LIVE CONTENT INTENT
+    - Build the same key used when capturing:
+        key = "${entity.packageName}|${entity.notificationId}|${entity.tag ?: ""}"
+    - Look up registry.get(key).
+    - If entry exists and entry.contentIntent != null:
+        try {
+            entry.contentIntent.send()
+            return ExactReplay
+        } catch (PendingIntent.CanceledException) {
+            registry.remove(key)
+        } catch (Exception e) {
+            log(e)
+        }
+
+  STEP 2 — LIVE ACTION INTENT (only if user tapped a specific action)
+    - Same lookup. Find the ActionEntry matching actionTitle.
+    - If found and its actionIntent != null → fire it.
+    - Return ActionReplay on success.
+
+  STEP 3 — STORED DEEP LINK
+    - If entity.deepLinkUri != null:
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .setPackage(entity.packageName)
+            context.startActivity(intent)
+            return DeepLinkReplay
+        } catch (ActivityNotFoundException) {
+            // Some apps don't handle their own scheme via setPackage,
+            // retry without setPackage:
+            try {
+                val intent2 = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent2)
+                return DeepLinkReplay
+            } catch (ActivityNotFoundException) {
+                log("deep link failed for ${entity.packageName}")
+            }
+        }
+
+  STEP 4 — APP MAIN ACTIVITY
+    - val launch = context.packageManager
+          .getLaunchIntentForPackage(entity.packageName)
+    - If launch != null:
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(launch)
+        return AppLaunch
+
+  STEP 5 — APP DETAILS PAGE
+    - Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+             Uri.fromParts("package", entity.packageName, null))
+    - Return AppDetails.
+
+  STEP 6 — FAILED
+    - Return Failed.
+
+───────────────────────────────────────────────
+3.4  SAFETY RULES
+───────────────────────────────────────────────
+
+  - Every startActivity and PendingIntent.send is wrapped in
+    try/catch. Never crash.
+  - All lookups are O(1) on the ConcurrentHashMap.
+  - No disk I/O on the main thread. ReplayEngine methods should be
+    called from a coroutine on Dispatchers.Main.immediate for the
+    actual launch, but the lookup itself is instant.
+  - Before firing a PendingIntent, optionally check
+    `pendingIntent.isImmutable` — immutable intents from other apps
+    will throw on send() in some cases. Handle it silently.
+
+───────────────────────────────────────────────
+3.5  PACKAGE VISIBILITY (Android 11+)
+───────────────────────────────────────────────
+
+  Add to AndroidManifest.xml:
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
+  Without this, getLaunchIntentForPackage returns null for most apps.
+
+
+═══════════════════════════════════════════════════════════════════
+  UI INTEGRATION — "OPEN ORIGINAL" BUTTON
+═══════════════════════════════════════════════════════════════════
+
+In Notification Detail screen, replace the current "Open App" button
+with "Open Original".
+
+───────────────────────────────────────────────
+4.1  BUTTON DESIGN
+───────────────────────────────────────────────
+
+  - Full-width premium pill button, 56dp tall.
+  - Leading icon: arrow-out-of-box icon in accent.
+  - Label: "Open Original".
+  - Trailing: a small status dot + tiny caption:
+      ● Green   "Exact replay ready"    (live contentIntent present)
+      ● Amber   "Opens the app"          (will fall back)
+      ● Grey    "No longer available"    (nothing will work)
+  - Status updates LIVE via registry.liveKeys StateFlow collected
+    in the ViewModel.
+
+───────────────────────────────────────────────
+4.2  ON TAP BEHAVIOR
+───────────────────────────────────────────────
+
+  - Instant press animation (scale 0.97) on touch-down + haptic.
+  - Call ReplayEngine.replay(entity) on Dispatchers.IO for the
+    lookup, Dispatchers.Main.immediate for the startActivity.
+  - Handle the result:
+
+      ExactReplay    → subtle accent bloom on button, then the app
+                       opens. Feels perfect. No toast.
+      ActionReplay   → same.
+      DeepLinkReplay → tiny glass chip appears below the button for
+                       2s: "Opened via deep link".
+      AppLaunch      → glass chip for 2s:
+                       "Opened the app — original screen no longer
+                        available."
+      AppDetails     → glass chip:
+                       "Opened app settings."
+      Failed         → glass toast (crimson tint):
+                       "This notification can no longer be opened."
+
+───────────────────────────────────────────────
+4.3  ACTION BUTTONS IN DETAIL
+───────────────────────────────────────────────
+
+  The detail screen lists every Notification.Action.
+  For each one:
+
+  - Check registry for a matching live actionIntent.
+  - If live → render the action button as ACTIVE, accent-tinted.
+    Tap fires the real PendingIntent via ReplayEngine.replayAction().
+    This makes Gmail's "Archive" button work for real.
+  - If dead → render the button as DISABLED with muted style and
+    a small caption below: "Action no longer available".
+
+───────────────────────────────────────────────
+4.4  LIVE STATUS PILL (on each card in the list)
+───────────────────────────────────────────────
+
+  Optional but premium: show a tiny 6dp dot on the left edge of
+  each notification card:
+      Green   → exact replay is currently possible
+      Grey    → fallback only
+
+  This is a subtle power-user signal that makes the app feel alive.
+
+───────────────────────────────────────────────
+4.5  FIRST-TIME EXPLAINER CARD
+───────────────────────────────────────────────
+
+  The first time the user sees a fallback (AppLaunch / DeepLinkReplay
+  / Failed), show a one-time glass info card inside the Detail screen:
+
+      "About 'Open Original'"
+      "While a notification is still in your status bar, we can
+       reopen the exact same screen. Once it's dismissed or the
+       device reboots, Android no longer allows it — we then open
+       the app for you instead."
+      [ Got it ]
+
+  Store the "seen" flag in DataStore. Never show again.
+
+───────────────────────────────────────────────
+4.6  HONEST TOOLTIP
+───────────────────────────────────────────────
+
+  Long-press the "Open Original" button → glass tooltip:
+      "Exact replay works while the notification is live.
+       After that, we open the app."
+
+
+═══════════════════════════════════════════════════════════════════
+  DATABASE CHANGES
+═══════════════════════════════════════════════════════════════════
+
+Add to NotificationEntity:
+
+  val deepLinkUri: String?         = null
+  val deepLinkSource: String?      = null
+  val deepLinkConfidence: String?  = null
+
+Bump DB version, write the Room migration. Existing rows stay
+nullable — no data loss.
+
+
+═══════════════════════════════════════════════════════════════════
+  TESTING & VALIDATION
+═══════════════════════════════════════════════════════════════════
+
+Add unit tests for:
+
+  - DeepLinkExtractor: given a bundle with a whatsapp:// URI, it
+    returns it with HIGH/MEDIUM confidence.
+  - DeepLinkExtractor: given only an image URL, it returns null.
+  - ReplayEngine: given an empty registry and null deep link, it
+    falls through to AppLaunch.
+  - ReplayEngine: given a canceled PendingIntent, it does NOT crash
+    and falls through to the next step.
+  - LiveNotificationRegistry: LRU evicts after 500 entries.
+
+Add a debug-only screen (behind a long-press in Settings → About)
+that shows:
+  - Registry size
+  - List of live keys
+  - A manual "replay" test button per live entry
+  This lets you verify behavior while testing.
+
+
+═══════════════════════════════════════════════════════════════════
+  FINAL CHECKLIST
+═══════════════════════════════════════════════════════════════════
+
+  □ DeepLinkExtractor built with 6-step extraction order.
+  □ Match rules filter out image/analytics noise.
+  □ Deep link + source + confidence stored in Room.
+  □ LiveNotificationRegistry as Hilt singleton with LRU cap.
+  □ Registry strips large bitmaps before storing.
+  □ Registry cleared on onNotificationRemoved + service destroy.
+  □ registry.liveKeys StateFlow emitted to UI.
+  □ ReplayEngine with 6-step fallback chain.
+  □ ReplayEngine never crashes; every call try/catch wrapped.
+  □ "Open Original" button with live status dot.
+  □ Action buttons fire live PendingIntents when possible.
+  □ Dead actions visually disabled with caption.
+  □ First-time explainer card shown once.
+  □ Long-press tooltip explains the limitation.
+  □ <queries> block added to manifest.
+  □ Room migration written.
+  □ Unit tests present.
+  □ Debug screen for manual verification.
+  □ All UI matches Obsidian Glass design system.
+
+Output the complete Kotlin + Compose code, file by file.
+Say "CONTINUE?" if you hit a length limit.

@@ -4,13 +4,15 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
         NotificationEntity::class,
         AppInfoEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class VaultDatabase : RoomDatabase() {
@@ -35,10 +37,18 @@ abstract class VaultDatabase : RoomDatabase() {
                     VaultDatabase::class.java,
                     "notifyvault_live_v3.db"
                 )
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRATION_3_4)
                     .build()
                 INSTANCE = instance
                 instance
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE notifications ADD COLUMN deepLinkUri TEXT")
+                database.execSQL("ALTER TABLE notifications ADD COLUMN deepLinkSource TEXT")
+                database.execSQL("ALTER TABLE notifications ADD COLUMN deepLinkConfidence TEXT")
             }
         }
     }

@@ -42,6 +42,7 @@ import com.example.ui.screens.ExclusionRulesScreen
 import com.example.ui.screens.LockSetupScreen
 import com.example.ui.screens.SearchScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.ReplayDebugScreen
 import com.example.ui.theme.LocalVaultColors
 import com.example.ui.theme.LocalVaultCustomization
 import com.example.ui.theme.NotifyVaultTheme
@@ -180,8 +181,6 @@ fun NotifyVaultApp(
         return
     }
 
-    val isTopLevelRoute = currentRoute in listOf("vault", "search", "insights", "studio")
-
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -222,7 +221,8 @@ fun NotifyVaultApp(
                 "settings" -> SettingsScreen(
                     viewModel = viewModel,
                     onBack = { currentRoute = "vault" },
-                    onNavigateToExclusionRules = { currentRoute = "exclusions" }
+                    onNavigateToExclusionRules = { currentRoute = "exclusions" },
+                    onNavigateToReplayDebug = { currentRoute = "replay-debug" }
                 )
                 "exclusions" -> ExclusionRulesScreen(
                     onBack = { currentRoute = "settings" }
@@ -231,6 +231,10 @@ fun NotifyVaultApp(
                     notificationId = selectedNotificationId,
                     viewModel = viewModel,
                     onBack = { currentRoute = "vault" }
+                )
+                "replay-debug" -> ReplayDebugScreen(
+                    viewModel = viewModel,
+                    onBack = { currentRoute = "settings" }
                 )
                 else -> HomeScreen(
                     viewModel = viewModel,

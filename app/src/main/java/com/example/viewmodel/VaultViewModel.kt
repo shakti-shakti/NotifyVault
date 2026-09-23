@@ -20,6 +20,9 @@ import com.example.data.NotificationEntity
 import com.example.data.NotificationRepository
 import com.example.data.VaultDatabase
 import com.example.service.NotifyVaultNotificationListenerService
+import com.example.service.LiveNotificationRegistry
+import com.example.data.ReplayEngine
+import com.example.data.ReplayResult
 import com.example.security.LockManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +54,9 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: NotificationRepository
     private val database = VaultDatabase.getInstance(application)
+    private val liveRegistry = LiveNotificationRegistry.getInstance()
+    private val replayEngine = ReplayEngine.getInstance(application)
+    val liveNotificationKeys: StateFlow<Set<String>> = liveRegistry.liveKeys
 
     // Real Notification Listener Permission status
     private val _isListenerPermissionGranted = MutableStateFlow(false)
@@ -460,6 +466,18 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getNotificationById(id: Long) = repository.getById(id)
+
+    fun replay(notification: NotificationEntity): ReplayResult =
+        replayEngine.replay(notification)
+
+    fun replayAction(notification: NotificationEntity, actionTitle: String): ReplayResult =
+        replayEngine.replayAction(notification, actionTitle)
+
+    fun isExactReplayReady(notification: NotificationEntity): Boolean =
+        replayEngine.isExactReplayReady(notification)
+
+    fun isActionLive(notification: NotificationEntity, actionTitle: String): Boolean =
+        replayEngine.isActionLive(notification, actionTitle)
 
     // Generates a real Android notification to test live capture pipeline
     fun sendVerificationNotification() {

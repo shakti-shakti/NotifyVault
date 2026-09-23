@@ -66,5 +66,8 @@ data class NotificationEntity(
     val amountString: String? = null,
     val hasLink: Boolean = false,
     val linkUrl: String? = null,
+    val deepLinkUri: String? = null,
+    val deepLinkSource: String? = null,
+    val deepLinkConfidence: String? = null,
     val rawExtrasJson: String = "{}"
 )

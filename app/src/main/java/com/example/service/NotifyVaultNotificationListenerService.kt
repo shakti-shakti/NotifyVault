@@ -14,12 +14,14 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationCompat
 import com.example.data.AppInfoResolver
+import com.example.data.DeepLinkExtractor
 import com.example.data.NotificationEntity
 import com.example.data.NotificationRepository
 import com.example.data.VaultDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,6 +30,7 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var database: VaultDatabase
+    private val liveRegistry = LiveNotificationRegistry.getInstance()
 
     override fun onCreate() {
         super.onCreate()
@@ -37,6 +40,8 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        liveRegistry.clear()
+        serviceScope.cancel()
         super.onDestroy()
         if (instance == this) {
             instance = null
@@ -46,6 +51,11 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         rescanActiveNotifications()
+    }
+
+    override fun onListenerDisconnected() {
+        liveRegistry.clear()
+        super.onListenerDisconnected()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
@@ -62,6 +72,9 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
         // Filter our own internal ongoing foreground notifications, but allow test alerts
         val isTestNotification = extras.getBoolean("IS_NOTIFY_VAULT_TEST", false)
         if (pkgName == applicationContext.packageName && !isTestNotification) return
+
+        liveRegistry.put(LiveNotificationRegistry.fromStatusBarNotification(sbn))
+        val extractedLink = DeepLinkExtractor.extract(notification, pkgName, applicationContext)
 
         // 1. Resolve human-readable App Name and App Icon
         val resolvedApp = AppInfoResolver.resolveSync(applicationContext, pkgName, database)
@@ -261,9 +274,28 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
             isGroupConversation = isGroupConversation
         )
 
+        val storedLink = if (extractedLink != null) {
+            extractedLink
+        } else {
+            null
+        }
+
         serviceScope.launch {
             try {
-                database.notificationDao().insert(parsedEntity)
+                val highConfidenceExisting = database.notificationDao()
+                    .getHighConfidenceDeepLink(pkgName, sbn.groupKey)
+                val shouldKeepExisting =
+                    highConfidenceExisting?.deepLinkUri != null &&
+                        highConfidenceExisting.deepLinkConfidence == "HIGH" &&
+                        (extractedLink == null ||
+                            extractedLink.confidence != com.example.data.LinkConfidence.HIGH)
+                database.notificationDao().insert(
+                    parsedEntity.copy(
+                        deepLinkUri = if (shouldKeepExisting) highConfidenceExisting?.deepLinkUri else storedLink?.uri,
+                        deepLinkSource = if (shouldKeepExisting) highConfidenceExisting?.deepLinkSource else storedLink?.source?.name,
+                        deepLinkConfidence = if (shouldKeepExisting) highConfidenceExisting?.deepLinkConfidence else storedLink?.confidence?.name
+                    )
+                )
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -272,7 +304,8 @@ class NotifyVaultNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         super.onNotificationRemoved(sbn)
-        // Never delete from vault archive
+        if (sbn != null) liveRegistry.remove(sbn.key)
+        // Never delete from vault archive.
     }
 
     private fun createNotificationChannel() {

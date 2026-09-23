@@ -39,9 +39,11 @@ import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,7 +61,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.NotificationEntity
-import com.example.data.OpenAppUseCase
+import com.example.data.ReplayExplainerStore
+import com.example.data.ReplayResult
 import com.example.ui.components.ActionCircleButton
 import com.example.ui.components.AmbientMeshBackground
 import com.example.ui.components.AppIconOrb
@@ -89,6 +92,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -104,6 +109,10 @@ fun DetailScreen(
 
     val notificationFlow = remember(notificationId) { viewModel.getNotificationById(notificationId) }
     val notification by notificationFlow.collectAsStateWithLifecycle(initialValue = null)
+    val liveKeys by viewModel.liveNotificationKeys.collectAsStateWithLifecycle()
+    val replayStore = remember(context) { ReplayExplainerStore(context) }
+    val hasSeenExplainer by replayStore.hasSeen.collectAsStateWithLifecycle(initialValue = false)
+    val replayScope = rememberCoroutineScope()
 
     var contentExpanded by remember { mutableStateOf(true) }
     var actionsExpanded by remember { mutableStateOf(true) }
@@ -111,6 +120,8 @@ fun DetailScreen(
     var channelExpanded by remember { mutableStateOf(true) }
     var flagsExpanded by remember { mutableStateOf(true) }
     var rawExpanded by remember { mutableStateOf(false) }
+    var replayFeedback by remember(notificationId) { mutableStateOf<String?>(null) }
+    var showExplainer by remember(notificationId) { mutableStateOf(false) }
 
     if (notification == null) {
         Box(
@@ -127,6 +138,34 @@ fun DetailScreen(
     val item = notification!!
     val categoryPalette = getCategoryPalette(item.category)
     val appColor = categoryPalette.base
+    val exactReplayReady = remember(item, liveKeys) { viewModel.isExactReplayReady(item) }
+
+    fun handleReplay(result: ReplayResult) {
+        when (result) {
+            ReplayResult.ExactReplay, ReplayResult.ActionReplay -> {
+                replayFeedback = null
+            }
+            ReplayResult.DeepLinkReplay -> replayFeedback = "Opened via deep link"
+            ReplayResult.AppLaunch -> replayFeedback = "Opened the app — original screen no longer available."
+            ReplayResult.AppDetails -> replayFeedback = "Opened app settings."
+            ReplayResult.Failed -> replayFeedback = "This notification can no longer be opened."
+        }
+        if (result !is ReplayResult.ExactReplay &&
+            result !is ReplayResult.ActionReplay &&
+            !hasSeenExplainer
+        ) {
+            showExplainer = true
+        }
+        if (result is ReplayResult.DeepLinkReplay ||
+            result is ReplayResult.AppLaunch ||
+            result is ReplayResult.AppDetails
+        ) {
+            replayScope.launch {
+                delay(2200)
+                replayFeedback = null
+            }
+        }
+    }
 
     AmbientMeshBackground(modifier = modifier) {
         Column(
@@ -196,7 +235,115 @@ fun DetailScreen(
                 )
             }
 
-            // ACTION BAR: Open App + Star + Copy + Share + Delete
+            // OPEN ORIGINAL: exact live PendingIntent first, then honest fallbacks.
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                shape = ShapePill,
+                accentBorder = exactReplayReady
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .instantTap(
+                            onLongClick = {
+                                replayFeedback = "Exact replay works while the notification is live. After that, we open the app."
+                                replayScope.launch {
+                                    delay(3000)
+                                    replayFeedback = null
+                                }
+                            },
+                            onClick = { handleReplay(viewModel.replay(item)) }
+                        )
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(appColor.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.OpenInNew, null, tint = appColor, modifier = Modifier.size(19.dp))
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Open Original",
+                            style = VaultTitle.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                            color = colors.textPrimary
+                        )
+                        Text(
+                            if (exactReplayReady) "Exact replay ready" else "Opens the app",
+                            style = VaultCaption.copy(color = if (exactReplayReady) Color(0xFF6EE7B7) else AurumPalette.base)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (exactReplayReady) Color(0xFF6EE7B7) else AurumPalette.base)
+                    )
+                }
+            }
+
+            if (showExplainer) {
+                Spacer(modifier = Modifier.height(10.dp))
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    shape = ShapeL,
+                    accentBorder = true
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            "About “Open Original”",
+                            style = VaultTitle.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                            color = colors.textPrimary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "While a notification is still in your status bar, NotifyVault can reopen the exact same screen. Once it is dismissed or the device reboots, Android no longer allows that; NotifyVault opens the app instead.",
+                            style = VaultBodyM.copy(fontSize = 12.sp),
+                            color = colors.textSecondary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Got it",
+                            style = VaultLabel.copy(color = colors.accent.base),
+                            modifier = Modifier
+                                .clip(ShapePill)
+                                .clickable {
+                                    showExplainer = false
+                                    replayScope.launch { replayStore.markSeen() }
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            replayFeedback?.let { feedback ->
+                Spacer(modifier = Modifier.height(8.dp))
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    shape = ShapePill,
+                    accentBorder = feedback.contains("no longer")
+                ) {
+                    Text(
+                        feedback,
+                        style = VaultCaption.copy(color = if (feedback.contains("no longer")) Color(0xFFFB7185) else colors.textSecondary),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
+                    )
+                }
+            }
+
+            // ACTION BAR: Star + Copy + Share + Delete
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -241,18 +388,6 @@ fun DetailScreen(
                             } catch (e: Exception) {
                                 e.printStackTrace()
                             }
-                        }
-                    )
-                    ActionCircleButton(
-                        icon = Icons.Default.OpenInNew,
-                        label = "Open App",
-                        tint = appColor,
-                        onClick = {
-                            OpenAppUseCase.openApp(
-                                context = context,
-                                packageName = item.packageName,
-                                appName = item.appName
-                            )
                         }
                     )
                     ActionCircleButton(
@@ -435,17 +570,48 @@ fun DetailScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 parsedActions.forEach { actionTitle ->
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(ShapePill)
-                                            .background(appColor.copy(alpha = 0.15f))
-                                            .border(1.dp, appColor.copy(alpha = 0.5f), ShapePill)
-                                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                                    ) {
-                                        Text(
-                                            text = actionTitle,
-                                            style = VaultLabel.copy(color = appColor, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                                        )
+                                    val actionLive = remember(actionTitle, liveKeys) {
+                                        viewModel.isActionLive(item, actionTitle)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(ShapePill)
+                                                .background(
+                                                    if (actionLive) appColor.copy(alpha = 0.15f)
+                                                    else colors.surface.copy(alpha = 0.35f)
+                                                )
+                                                .border(
+                                                    1.dp,
+                                                    if (actionLive) appColor.copy(alpha = 0.5f)
+                                                    else colors.cardStroke,
+                                                    ShapePill
+                                                )
+                                                .then(
+                                                    if (actionLive) {
+                                                        Modifier.instantTap {
+                                                            handleReplay(viewModel.replayAction(item, actionTitle))
+                                                        }
+                                                    } else Modifier
+                                                )
+                                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                                        ) {
+                                            Text(
+                                                text = actionTitle,
+                                                style = VaultLabel.copy(
+                                                    color = if (actionLive) appColor else colors.textTertiary,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 12.sp
+                                                )
+                                            )
+                                        }
+                                        if (!actionLive) {
+                                            Text(
+                                                "Action no longer available",
+                                                style = VaultCaption.copy(fontSize = 9.sp, color = colors.textTertiary),
+                                                modifier = Modifier.padding(top = 3.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }

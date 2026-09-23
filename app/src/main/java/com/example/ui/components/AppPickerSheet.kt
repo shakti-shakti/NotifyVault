@@ -63,8 +63,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.AppInfoResolver
-import com.example.data.VaultDatabase
 import com.example.ui.theme.AurumPalette
 import com.example.ui.theme.DisplayM
 import com.example.ui.theme.EmeraldPalette
@@ -133,6 +131,7 @@ fun AppPickerSheet(
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(AppPickerFilterTab.ALL) }
     var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
 
     val allApps = remember { mutableStateListOf<InstalledAppItem>() }
     val selectedPackages = remember { mutableStateListOf<String>().apply { addAll(initiallySelected) } }
@@ -155,33 +154,32 @@ fun AppPickerSheet(
     }
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            val pm = context.packageManager
-            val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            val db = VaultDatabase.getInstance(context)
-
-            val list = packages.map { appInfo ->
-                val pkg = appInfo.packageName
-                val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                val label = try {
-                    pm.getApplicationLabel(appInfo).toString()
-                } catch (e: Exception) {
-                    pkg
-                }
-                val cached = AppInfoResolver.resolve(context, pkg, db)
-                InstalledAppItem(
-                    packageName = pkg,
-                    appName = cached.appName.ifBlank { label },
-                    isSystemApp = isSystem,
-                    iconPath = cached.iconPath
-                )
-            }.sortedBy { it.appName.lowercase() }
-
-            withContext(Dispatchers.Main) {
-                allApps.clear()
-                allApps.addAll(list)
-                isLoading = false
+        try {
+            val list = withContext(Dispatchers.IO) {
+                val pm = context.packageManager
+                pm.getInstalledApplications(PackageManager.GET_META_DATA)
+                    .asSequence()
+                    .map { appInfo ->
+                        val pkg = appInfo.packageName
+                        val label = runCatching { pm.getApplicationLabel(appInfo).toString() }
+                            .getOrDefault(pkg)
+                            .ifBlank { pkg }
+                        InstalledAppItem(
+                            packageName = pkg,
+                            appName = label,
+                            isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                        )
+                    }
+                    .distinctBy { it.packageName }
+                    .sortedBy { it.appName.lowercase() }
+                    .toList()
             }
+            allApps.clear()
+            allApps.addAll(list)
+        } catch (error: Exception) {
+            loadError = error.message ?: "Installed apps could not be loaded."
+        } finally {
+            isLoading = false
         }
     }
 
@@ -412,6 +410,24 @@ fun AppPickerSheet(
                         Text(
                             text = "Loading installed apps…",
                             style = VaultCaption.copy(color = colors.textTertiary)
+                        )
+                    }
+                }
+            } else if (loadError != null) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Could not load installed apps",
+                            style = VaultBodyM.copy(color = colors.textSecondary)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = loadError.orEmpty(),
+                            style = VaultCaption.copy(color = colors.textTertiary),
+                            modifier = Modifier.padding(horizontal = 32.dp)
                         )
                     }
                 }

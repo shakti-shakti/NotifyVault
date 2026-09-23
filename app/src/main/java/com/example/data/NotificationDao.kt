@@ -34,6 +34,16 @@ interface NotificationDao {
     fun getById(id: Long): Flow<NotificationEntity?>
 
     @Query("""
+        SELECT * FROM notifications
+        WHERE packageName = :packageName
+          AND ((groupKey = :groupKey) OR (groupKey IS NULL AND :groupKey IS NULL))
+          AND deepLinkConfidence = 'HIGH'
+        ORDER BY captureTime DESC
+        LIMIT 1
+    """)
+    suspend fun getHighConfidenceDeepLink(packageName: String, groupKey: String?): NotificationEntity?
+
+    @Query("""
         SELECT * FROM notifications 
         WHERE isArchived = 0 
         AND (
