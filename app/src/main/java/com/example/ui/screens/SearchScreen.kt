@@ -100,6 +100,10 @@ fun SearchScreen(
     val recentSearches = remember {
         mutableStateListOf<String>()
     }
+    val hasActiveFilters = searchQuery.isNotBlank() ||
+        searchSelectedApp != null ||
+        searchDateRange != DateRangeFilter.ALL ||
+        searchTypeFilters.isNotEmpty()
 
     if (showAppPickerForScope) {
         AppPickerSheet(
@@ -376,6 +380,21 @@ fun SearchScreen(
                         )
                     }
                 }
+
+                if (hasActiveFilters) {
+                    Text(
+                        text = "Clear all",
+                        style = VaultCaption.copy(
+                            color = colors.accent.base,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        ),
+                        modifier = Modifier
+                            .clip(ShapePill)
+                            .clickable { viewModel.clearSearchFilters() }
+                            .padding(horizontal = 6.dp, vertical = 6.dp)
+                    )
+                }
             }
 
             // Recent Searches (if query is empty and no custom filters)
@@ -434,8 +453,12 @@ fun SearchScreen(
             // Results List
             if (searchResults.isEmpty()) {
                 EmptyState(
-                    title = "No Matches Found",
-                    description = "Try searching by app name, OTP code, or notification title.",
+                    title = if (hasActiveFilters) "No Matches Found" else "No Notifications Yet",
+                    description = if (hasActiveFilters) {
+                        "Clear a filter or try a broader app, date, type, or text search."
+                    } else {
+                        "Captured alerts will appear here as NotifyVault receives them."
+                    },
                     icon = Icons.Default.Search
                 )
             } else {

@@ -36,6 +36,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -140,23 +141,24 @@ fun HomeScreen(
     val customChips by chipRepo.customChips.collectAsStateWithLifecycle()
     val hiddenBuiltIns by chipRepo.hiddenBuiltInChips.collectAsStateWithLifecycle()
     val quickChipPackages by chipRepo.quickChipPackages.collectAsStateWithLifecycle()
-    val topApps by viewModel.realTopApps.collectAsStateWithLifecycle()
+    val temporaryQuickChip by chipRepo.temporaryQuickChip.collectAsStateWithLifecycle()
     val selectedAppPackage by viewModel.selectedAppPackage.collectAsStateWithLifecycle()
     val selectedCustomChip by viewModel.selectedCustomChip.collectAsStateWithLifecycle()
 
     var showCustomFilterDialog by remember { mutableStateOf(false) }
     var editingCustomChip by remember { mutableStateOf<CustomFilterChip?>(null) }
+    var chipActionMenu by remember { mutableStateOf<CustomFilterChip?>(null) }
     var chipToHide by remember { mutableStateOf<String?>(null) }
     var chipToDelete by remember { mutableStateOf<CustomFilterChip?>(null) }
     var showAppPickerForQuickChips by remember { mutableStateOf(false) }
+    var showAppPickerForSingleApp by remember { mutableStateOf(false) }
     var appToUnpin by remember { mutableStateOf<String?>(null) }
+    var appToPin by remember { mutableStateOf<String?>(null) }
 
-    val effectiveQuickChips = remember(quickChipPackages, topApps) {
-        if (quickChipPackages.isNotEmpty()) {
-            quickChipPackages
-        } else {
-            topApps.map { it.packageName }
-        }
+    val effectiveQuickChips = remember(quickChipPackages, temporaryQuickChip) {
+        (quickChipPackages + listOfNotNull(temporaryQuickChip))
+            .distinct()
+            .take(7)
     }
 
     // Rotating search placeholders
@@ -465,11 +467,16 @@ fun HomeScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
                             .padding(horizontal = 20.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                         // Built-in Chips
                         visibleBuiltIns.forEach { filter ->
                             val isSelected = selectedFilter == filter && selectedCustomChip == null
@@ -506,14 +513,17 @@ fun HomeScreen(
                                     }
                                 },
                                 onLongClick = {
-                                    editingCustomChip = chip
+                                    chipActionMenu = chip
                                 }
                             )
                         }
 
-                        // Create Custom Filter "+" Button
+                        }
+
+                        // Create Custom Filter "+" Button stays pinned at the end.
                         Box(
                             modifier = Modifier
+                                .padding(start = 8.dp)
                                 .clip(ShapePill)
                                 .background(colors.surface.copy(alpha = 0.6f))
                                 .border(1.dp, colors.cardStroke, ShapePill)
@@ -545,16 +555,46 @@ fun HomeScreen(
                 }
 
                 // 2.2 E. DASHBOARD APP QUICK-CHIPS ROW (Feature 5)
-                if (effectiveQuickChips.isNotEmpty()) {
-                    item {
-                        Row(
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // The app-grid picker is always visible, including when
+                        // the user skipped initial quick-chip setup.
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(horizontal = 20.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .clip(ShapePill)
+                                .background(colors.surface.copy(alpha = 0.6f))
+                                .border(1.dp, colors.cardStroke, ShapePill)
+                                .clickable { showAppPickerForSingleApp = true }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
                         ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Apps,
+                                    contentDescription = "Choose app",
+                                    tint = colors.accent.base,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Apps",
+                                    style = VaultCaption.copy(
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                )
+                            }
+                        }
+
                             effectiveQuickChips.forEach { pkg ->
                                 val appInfo = remember(pkg) {
                                     AppInfoResolver.resolveSync(context, pkg)
@@ -575,7 +615,10 @@ fun HomeScreen(
                                         )
                                         .combinedClickable(
                                             onClick = { viewModel.selectAppPackage(pkg) },
-                                            onLongClick = { appToUnpin = pkg }
+                                             onLongClick = {
+                                                 if (quickChipPackages.contains(pkg)) appToUnpin = pkg
+                                                 else appToPin = pkg
+                                             }
                                         )
                                         .padding(horizontal = 10.dp, vertical = 5.dp)
                                 ) {
@@ -601,35 +644,6 @@ fun HomeScreen(
                                 }
                             }
 
-                            // Manage Quick Chips "+" Button
-                            Box(
-                                modifier = Modifier
-                                    .clip(ShapePill)
-                                    .background(colors.surface.copy(alpha = 0.6f))
-                                    .border(1.dp, colors.cardStroke, ShapePill)
-                                    .clickable { showAppPickerForQuickChips = true }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = "Pin Apps",
-                                        tint = colors.textTertiary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = "Pin Apps",
-                                        style = VaultCaption.copy(
-                                            color = colors.textSecondary,
-                                            fontSize = 11.sp
-                                        )
-                                    )
-                                }
-                            }
                         }
                     }
                 }
@@ -974,6 +988,71 @@ fun HomeScreen(
         }
 
         // Custom Filter Dialog (Create or Edit)
+        if (chipActionMenu != null) {
+            val chip = chipActionMenu!!
+            AlertDialog(
+                onDismissRequest = { chipActionMenu = null },
+                title = { Text(chip.name, style = VaultTitle) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        TextButton(
+                            onClick = {
+                                editingCustomChip = chip
+                                chipActionMenu = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Rename / edit apps", modifier = Modifier.fillMaxWidth(), color = colors.textPrimary)
+                        }
+                        TextButton(
+                            onClick = {
+                                val next = if (chip.colorHex == "#E2A84B") "#6C63FF" else "#E2A84B"
+                                chipRepo.changeCustomChipColor(chip.id, next)
+                                chipActionMenu = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Change color", modifier = Modifier.fillMaxWidth(), color = colors.textPrimary)
+                        }
+                        TextButton(
+                            onClick = {
+                                chipRepo.moveCustomChip(chip.id, -1)
+                                chipActionMenu = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Move earlier", modifier = Modifier.fillMaxWidth(), color = colors.textPrimary)
+                        }
+                        TextButton(
+                            onClick = {
+                                chipRepo.duplicateCustomChip(chip.id)
+                                chipActionMenu = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Duplicate", modifier = Modifier.fillMaxWidth(), color = colors.textPrimary)
+                        }
+                        TextButton(
+                            onClick = {
+                                chipRepo.deleteCustomChip(chip.id)
+                                if (selectedCustomChip?.id == chip.id) viewModel.selectCustomChip(null)
+                                chipActionMenu = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Delete", modifier = Modifier.fillMaxWidth(), color = Color(0xFFFB7185))
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { chipActionMenu = null }) {
+                        Text("Close", color = colors.accent.base)
+                    }
+                },
+                containerColor = colors.surface
+            )
+        }
+
         if (showCustomFilterDialog || editingCustomChip != null) {
             CustomFilterDialog(
                 initialChip = editingCustomChip,
@@ -1024,6 +1103,19 @@ fun HomeScreen(
                     showAppPickerForQuickChips = false
                 },
                 onClose = { showAppPickerForQuickChips = false }
+            )
+        }
+
+        if (showAppPickerForSingleApp) {
+            AppPickerSheet(
+                mode = AppPickerMode.SINGLE_SELECT,
+                title = "Choose App Scope",
+                onSingleAppSelected = { app ->
+                    chipRepo.setTemporaryQuickChip(app.packageName)
+                    viewModel.selectAppPackage(app.packageName)
+                    showAppPickerForSingleApp = false
+                },
+                onClose = { showAppPickerForSingleApp = false }
             )
         }
 
@@ -1087,6 +1179,38 @@ fun HomeScreen(
                 dismissButton = {
                     TextButton(onClick = { appToUnpin = null }) {
                         Text("Cancel", color = colors.textSecondary)
+                    }
+                },
+                containerColor = colors.surface
+            )
+        }
+
+        if (appToPin != null) {
+            val temporaryAppName = remember(appToPin) {
+                AppInfoResolver.resolveSync(context, appToPin!!).appName
+            }
+            AlertDialog(
+                onDismissRequest = { appToPin = null },
+                title = { Text("Pin Quick-Chip?", style = VaultTitle) },
+                text = {
+                    Text(
+                        "Pin \"$temporaryAppName\" so it stays on your dashboard?",
+                        style = VaultBodyM.copy(color = colors.textPrimary)
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            appToPin?.let { chipRepo.pinTemporaryQuickChip(it) }
+                            appToPin = null
+                        }
+                    ) {
+                        Text("Pin", color = colors.accent.base, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { appToPin = null }) {
+                        Text("Not now", color = colors.textSecondary)
                     }
                 },
                 containerColor = colors.surface

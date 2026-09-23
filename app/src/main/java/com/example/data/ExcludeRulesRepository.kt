@@ -58,6 +58,10 @@ class ExcludeRulesRepository private constructor(private val context: Context) {
     private val _minPriority = MutableStateFlow(prefs.getInt(KEY_MIN_PRIORITY, -2))
     val minPriority: StateFlow<Int> = _minPriority.asStateFlow()
 
+    // Optional day-of-week capture window. Empty means every day.
+    private val _excludedDays = MutableStateFlow(loadExcludedDays())
+    val excludedDays: StateFlow<Set<Int>> = _excludedDays.asStateFlow()
+
     // Quiet Hours
     private val _isQuietHoursEnabled = MutableStateFlow(prefs.getBoolean(KEY_QUIET_HOURS_ENABLED, false))
     val isQuietHoursEnabled: StateFlow<Boolean> = _isQuietHoursEnabled.asStateFlow()
@@ -216,6 +220,21 @@ class ExcludeRulesRepository private constructor(private val context: Context) {
         _minPriority.value = priority
     }
 
+    fun setExcludedDays(days: Set<Int>) {
+        prefs.edit().putString(KEY_EXCLUDED_DAYS, JSONArray(days.toList()).toString()).apply()
+        _excludedDays.value = days
+    }
+
+    private fun loadExcludedDays(): Set<Int> {
+        val json = prefs.getString(KEY_EXCLUDED_DAYS, null) ?: return emptySet()
+        return runCatching {
+            val array = JSONArray(json)
+            val days = mutableSetOf<Int>()
+            for (index in 0 until array.length()) days.add(array.getInt(index))
+            days
+        }.getOrDefault(emptySet())
+    }
+
     fun setQuietHours(enabled: Boolean, startMin: Int, endMin: Int) {
         prefs.edit()
             .putBoolean(KEY_QUIET_HOURS_ENABLED, enabled)
@@ -293,7 +312,15 @@ class ExcludeRulesRepository private constructor(private val context: Context) {
             return recordExclusion(appName, packageName, title, "Priority below threshold (${priority} < ${_minPriority.value})")
         }
 
-        // 7. Exclude by Time (Quiet Hours)
+        // 7. Exclude by day of week.
+        if (_excludedDays.value.isNotEmpty()) {
+            val day = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+            if (_excludedDays.value.contains(day)) {
+                return recordExclusion(appName, packageName, title, "Excluded on configured day of week")
+            }
+        }
+
+        // 8. Exclude by Time (Quiet Hours)
         if (_isQuietHoursEnabled.value) {
             val cal = Calendar.getInstance()
             val currentMinuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
@@ -311,7 +338,7 @@ class ExcludeRulesRepository private constructor(private val context: Context) {
             }
         }
 
-        // 8. Exclude by Repeat / Identical Notification
+        // 9. Exclude by Repeat / Identical Notification
         val repeatMin = _repeatWindowMinutes.value
         if (repeatMin > 0) {
             val key = "$packageName:$title:$text"
@@ -324,7 +351,7 @@ class ExcludeRulesRepository private constructor(private val context: Context) {
             recentNotificationTimestamps[key] = now
         }
 
-        // 9. Exclude by Text / Keyword / Regex
+        // 10. Exclude by Text / Keyword / Regex
         val combinedText = "$title $text $bigText"
         for (rule in _textRules.value) {
             if (!rule.isEnabled || rule.pattern.isBlank()) continue
@@ -398,6 +425,7 @@ class ExcludeRulesRepository private constructor(private val context: Context) {
         private const val KEY_TEXT_RULES = "key_text_rules"
         private const val KEY_EXCLUDED_CATEGORIES = "key_excluded_categories"
         private const val KEY_MIN_PRIORITY = "key_min_priority"
+        private const val KEY_EXCLUDED_DAYS = "key_excluded_days"
         private const val KEY_QUIET_HOURS_ENABLED = "key_quiet_hours_enabled"
         private const val KEY_QUIET_START_MIN = "key_quiet_start_min"
         private const val KEY_QUIET_END_MIN = "key_quiet_end_min"

@@ -92,6 +92,7 @@ fun ChangeLockFlow(
     val vibrator = remember { context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator }
 
     val currentMethod = lockManager.getLockMethod()
+    val currentPinLength = remember(currentMethod) { lockManager.getPinLength() }
     var step by remember { mutableStateOf(ChangeStep.VERIFY_OLD) }
     var selectedNewMethod by remember { mutableStateOf(LockMethod.PIN) }
 
@@ -214,13 +215,13 @@ fun ChangeLockFlow(
                                 when (currentMethod) {
                                     LockMethod.PIN -> {
                                         LockKeypad(
-                                            pinLength = 4,
+                                            pinLength = currentPinLength,
                                             currentLength = oldPinInput.length,
                                             onDigitClick = { d ->
-                                                if (oldPinInput.length < 6) {
+                                                if (oldPinInput.length < currentPinLength) {
                                                     oldPinInput += d
                                                     errorMessage = null
-                                                    if (oldPinInput.length >= 4) {
+                                                    if (oldPinInput.length == currentPinLength) {
                                                         if (lockManager.verifyCredential(oldPinInput)) {
                                                             step = ChangeStep.CHOOSE_NEW_METHOD
                                                         } else {
@@ -365,19 +366,39 @@ fun ChangeLockFlow(
                     ChangeStep.ENTER_NEW -> {
                         when (selectedNewMethod) {
                             LockMethod.PIN -> {
-                                LockKeypad(
-                                    pinLength = 4,
-                                    currentLength = newPinInput.length,
-                                    onDigitClick = { d ->
-                                        if (newPinInput.length < 6) {
-                                            newPinInput += d
-                                            if (newPinInput.length >= 4) {
-                                                step = ChangeStep.CONFIRM_NEW
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    LockKeypad(
+                                        pinLength = 6,
+                                        currentLength = newPinInput.length,
+                                        onDigitClick = { d ->
+                                            if (newPinInput.length < 6) {
+                                                newPinInput += d
+                                                errorMessage = null
                                             }
-                                        }
-                                    },
-                                    onDeleteClick = { if (newPinInput.isNotEmpty()) newPinInput = newPinInput.dropLast(1) }
-                                )
+                                        },
+                                        onDeleteClick = { if (newPinInput.isNotEmpty()) newPinInput = newPinInput.dropLast(1) }
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    val canContinue = newPinInput.length in 4..6
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .clip(ShapePill)
+                                            .background(if (canContinue) colors.accent.brush() else SolidColor(colors.surface))
+                                            .clickable(enabled = canContinue) { step = ChangeStep.CONFIRM_NEW },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            "Confirm ${newPinInput.length}-Digit PIN",
+                                            style = VaultTitle.copy(
+                                                fontSize = 14.sp,
+                                                color = if (canContinue) Color(0xFF0A0A10) else colors.textTertiary,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        )
+                                    }
+                                }
                             }
                             LockMethod.PASSWORD -> {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -437,10 +458,10 @@ fun ChangeLockFlow(
                         when (selectedNewMethod) {
                             LockMethod.PIN -> {
                                 LockKeypad(
-                                    pinLength = 4,
+                                    pinLength = newPinInput.length.coerceIn(4, 6),
                                     currentLength = confirmedNewPinInput.length,
                                     onDigitClick = { d ->
-                                        if (confirmedNewPinInput.length < 6) {
+                                        if (confirmedNewPinInput.length < newPinInput.length) {
                                             confirmedNewPinInput += d
                                             if (confirmedNewPinInput.length == newPinInput.length) {
                                                 if (confirmedNewPinInput == newPinInput) {

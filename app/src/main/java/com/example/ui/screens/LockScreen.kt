@@ -95,6 +95,7 @@ fun LockScreen(
 
     val lockMethod by lockManager.lockMethodFlow.collectAsState()
     val isBiometricEnabled by lockManager.biometricEnabledFlow.collectAsState()
+    val pinLength = remember(lockMethod) { lockManager.getPinLength() }
 
     var pinInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
@@ -144,6 +145,7 @@ fun LockScreen(
             delay(500)
             isError = false
             pinInput = ""
+            passwordInput = ""
         }
     }
 
@@ -365,7 +367,7 @@ fun LockScreen(
                                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                                 modifier = Modifier.padding(bottom = 20.dp)
                             ) {
-                                for (i in 0 until 4) {
+                                for (i in 0 until pinLength) {
                                     val isFilled = i < pinInput.length
                                     Box(
                                         modifier = Modifier
@@ -388,12 +390,12 @@ fun LockScreen(
                             }
 
                             LockKeypad(
-                                pinLength = 4,
+                                pinLength = pinLength,
                                 currentLength = pinInput.length,
                                 onDigitClick = { digit ->
-                                    if (pinInput.length < 6) {
+                                    if (pinInput.length < pinLength) {
                                         pinInput += digit
-                                        if (pinInput.length >= 4) {
+                                        if (pinInput.length == pinLength) {
                                             if (lockManager.verifyCredential(pinInput)) {
                                                 handleSuccessUnlock()
                                             } else {

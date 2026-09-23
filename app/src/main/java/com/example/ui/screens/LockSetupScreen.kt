@@ -341,16 +341,12 @@ fun LockSetupScreen(
                         when (selectedMethod) {
                             LockMethod.PIN -> {
                                 LockKeypad(
-                                    pinLength = 4,
+                                    pinLength = 6,
                                     currentLength = enteredPin.length,
                                     onDigitClick = { digit ->
                                         if (enteredPin.length < 6) {
                                             enteredPin += digit
                                             errorMessage = null
-                                            if (enteredPin.length >= 4) {
-                                                // Advance after 4 digits
-                                                step = SetupStep.CONFIRM_CREDENTIAL
-                                            }
                                         }
                                     },
                                     onDeleteClick = {
@@ -475,10 +471,10 @@ fun LockSetupScreen(
                         when (selectedMethod) {
                             LockMethod.PIN -> {
                                 LockKeypad(
-                                    pinLength = 4,
+                                    pinLength = enteredPin.length.coerceIn(4, 6),
                                     currentLength = confirmedPin.length,
                                     onDigitClick = { digit ->
-                                        if (confirmedPin.length < 6) {
+                                        if (confirmedPin.length < enteredPin.length) {
                                             confirmedPin += digit
                                             errorMessage = null
                                             if (confirmedPin.length == enteredPin.length) {
@@ -618,8 +614,12 @@ fun LockSetupScreen(
                         }
                     }
                     SetupStep.ENTER_CREDENTIAL -> {
-                        if (selectedMethod == LockMethod.PASSWORD) {
-                            val canProceed = enteredPassword.length >= 4
+                        if (selectedMethod == LockMethod.PASSWORD || selectedMethod == LockMethod.PIN) {
+                            val canProceed = if (selectedMethod == LockMethod.PIN) {
+                                enteredPin.length in 4..6
+                            } else {
+                                enteredPassword.length >= 4
+                            }
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -632,7 +632,11 @@ fun LockSetupScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "Continue",
+                                    text = if (selectedMethod == LockMethod.PIN) {
+                                        "Confirm ${enteredPin.length}-Digit PIN"
+                                    } else {
+                                        "Continue"
+                                    },
                                     style = VaultTitle.copy(
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
@@ -643,16 +647,28 @@ fun LockSetupScreen(
                         }
                     }
                     SetupStep.CONFIRM_CREDENTIAL -> {
-                        if (selectedMethod == LockMethod.PASSWORD) {
+                        if (selectedMethod == LockMethod.PASSWORD || selectedMethod == LockMethod.PIN) {
                             val canConfirm = confirmedPassword.isNotBlank()
+                            val pinCanConfirm = confirmedPin.length == enteredPin.length
+                            val confirmEnabled = if (selectedMethod == LockMethod.PIN) pinCanConfirm else canConfirm
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(50.dp)
                                     .clip(ShapePill)
-                                    .background(if (canConfirm) colors.accent.brush() else SolidColor(colors.surface))
-                                    .clickable(enabled = canConfirm) {
-                                        if (confirmedPassword == enteredPassword) {
+                                    .background(if (confirmEnabled) colors.accent.brush() else SolidColor(colors.surface))
+                                    .clickable(enabled = confirmEnabled) {
+                                        if (selectedMethod == LockMethod.PIN) {
+                                            if (confirmedPin == enteredPin) {
+                                                lockManager.setCredential(LockMethod.PIN, enteredPin)
+                                                lockManager.setBiometricEnabled(biometricEnabled)
+                                                step = SetupStep.SUCCESS
+                                            } else {
+                                                errorMessage = "PINs do not match."
+                                                triggerHapticError()
+                                                confirmedPin = ""
+                                            }
+                                        } else if (confirmedPassword == enteredPassword) {
                                             lockManager.setCredential(LockMethod.PASSWORD, enteredPassword)
                                             lockManager.setBiometricEnabled(biometricEnabled)
                                             step = SetupStep.SUCCESS
@@ -668,7 +684,7 @@ fun LockSetupScreen(
                                     style = VaultTitle.copy(
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (canConfirm) Color(0xFF0A0A10) else colors.textTertiary
+                                        color = if (confirmEnabled) Color(0xFF0A0A10) else colors.textTertiary
                                     )
                                 )
                             }

@@ -1,0 +1,355 @@
+═══════════════════════════════════════════════════════════════════
+  NOTIFYVAULT — FEATURE PACK v3.0
+  "Lock system, app pickers, exclude rules, dashboard chips,
+   contextual search."
+═══════════════════════════════════════════════════════════════════
+
+Continue building NotifyVault. The following features are now
+mandatory. Build every one of them fully, in code, in the Obsidian
+Glass design system established in Section 01 of the master prompt.
+
+No placeholders. No stubs. No "you can add this later."
+Every screen must match the premium bar already set.
+
+───────────────────────────────────────────────
+  FEATURE 1 — THE FULL LOCK SYSTEM
+───────────────────────────────────────────────
+
+Right now the lock screen is basic. Rebuild it as a real, complete,
+production-grade lock system. It must feel like the lock on a private
+banking app, not a toy.
+
+1.1  FIRST-LAUNCH SETUP FLOW
+  • On the very first launch, after onboarding, force the user into a
+    "Secure your vault" setup flow. It cannot be skipped.
+  • The flow asks the user to choose ONE lock method:
+      - 4–6 digit PIN
+      - Password (min 4 chars, supports letters/numbers/symbols)
+      - Pattern (real 3x3 Android-style pattern lock, min 4 dots)
+  • Optionally enable Biometric as a fast-unlock on top of the
+    chosen method. Biometric alone is NOT allowed — it must always
+    sit on top of a PIN / Password / Pattern fallback.
+  • Require the user to confirm the PIN / Password / Pattern twice
+    before saving.
+  • Show a beautiful strength meter for Password.
+  • Store the credential using PBKDF2 or Argon2 hashing with a random
+    salt. Never store plaintext. Store the salt + hash in EncryptedSharedPreferences.
+  • Store the Pattern as a hashed sequence of dot indices (never the
+    raw drawing).
+
+1.2  AUTO-LOCK BEHAVIOR (the missing piece)
+  • The vault MUST lock automatically when:
+      - The app is opened fresh (cold start) — always lock.
+      - The app returns from background after a user-defined timeout
+        (default: immediately, options: Immediately / 15s / 30s /
+        1m / 5m / Never).
+      - The screen turns off.
+      - The device reboots.
+  • Implement via ProcessLifecycleOwner with an observer that
+    tracks app foreground/background transitions and a timestamp
+    of the last time the app was backgrounded.
+  • When the app is backgrounded, immediately obscure the content in
+    the recent-apps screenshot (use FLAG_SECURE on the window, or
+    draw a branded blur overlay in onPause).
+  • On resume, if the timeout has expired, show the lock screen
+    before any content renders.
+  • The lock screen must appear BEFORE any notification data is
+    visible — even for one frame. This is critical.
+
+1.3  LOCK SCREEN (redesign)
+  • Frosted full-screen blur over the vault content behind it.
+  • Branded ambient mesh background in the active theme.
+  • Center: the unlock UI adapts to the chosen method:
+      - PIN:  a custom glass keypad, circular keys, spring press,
+              dots at the top that fill with accent as you type.
+              Auto-submits on correct length.
+      - Password: an elegant glass text field with a show/hide eye,
+              tabular mono font, "Unlock" pill button below.
+      - Pattern: a real 3x3 grid of dots on a glass panel, accent
+              line trails the finger with a soft glow, dots light up
+              as they're hit, vibrate on each dot. Minimum 4 dots.
+  • Biometric prompt auto-launches on entry if enabled, with a
+    beautiful "Use PIN / Password / Pattern" fallback link.
+  • Wrong attempts: subtle crimson shake on the input, no aggressive
+    full-screen red. Log the attempt count.
+  • After 5 wrong attempts: enforce a 30s cooldown, then 5 minutes,
+    then require typing the word "reset" to try again.
+  • Correct: keys dissolve into light, vault fades in with spring
+    scale from 0.96 → 1.0.
+
+1.4  CHANGING THE LOCK (must require the old one)
+  • In Settings → Privacy & Security → Change Lock:
+      - Step 1: Enter current PIN / Password / Pattern.
+      - Step 2: Only if correct, proceed to choose a new method.
+      - Step 3: Confirm new method twice.
+  • All of this is a full-screen flow, not a dialog. Use the same
+    Obsidian Glass design.
+  • Wrong old credential: 3 attempts allowed, then a 1-minute cooldown.
+
+1.5  TURNING LOCK OFF
+  • Require the current PIN / Password / Pattern.
+  • Show a serious confirmation sheet:
+    "Your vault will no longer be protected. Anyone with your phone
+     can read every notification. Continue?"
+  • Require typing "DISABLE" to confirm. No shortcuts.
+
+1.6  SETTINGS → PRIVACY & SECURITY (all toggles)
+  • Lock Method            → shows current method, tap to change
+  • Auto-Lock Timeout      → Immediately / 15s / 30s / 1m / 5m / Never
+  • Lock on Screen Off     → toggle
+  • Lock on App Close      → toggle
+  • Biometric Unlock       → toggle (only if a primary method is set)
+  • Hide Content in Recents → toggle (FLAG_SECURE)
+  • Blur Sensitive Content → toggle (masks OTPs and amounts on the
+                             vault screen until unlocked)
+  • Wrong Attempt Cooldown → shows current policy, read-only
+  • Emergency Wipe         → tap to arm, then typing a phrase wipes
+                             everything and removes the lock
+
+Every row uses the custom GlassRow component from Section 04 of the
+master prompt — NOT stock Preference.
+
+───────────────────────────────────────────────
+  FEATURE 2 — FILTER CHIPS (upgraded)
+───────────────────────────────────────────────
+
+Rebuild the filter chip row.
+
+2.1  SCROLLABLE ROW
+  • Horizontally scrollable, with left/right edge fade gradients.
+  • Snapping and inertial scroll feel — no jank.
+
+2.2  ALWAYS SHOW A "+" CHIP AT THE END
+  • The very last chip is always a "+" chip — a small glass pill
+    with a plus icon in accent color.
+  • It never scrolls away when the user reaches the end — it sits
+    pinned at the end of the scroll content.
+  • Tapping it opens the Premium App Filter Picker (Feature 3).
+
+2.3  USER-NAMED CHIPS
+  • Any chip the user creates is fully editable.
+  • Long-press a user chip → mini glass menu:
+      Rename · Edit apps in this chip · Change accent color ·
+      Reorder · Duplicate · Delete
+  • Rename opens a premium rename sheet: glass input field, live
+    preview of the chip as they type, character limit 20, save
+    on Enter or the Save pill.
+  • The name is stored alongside the chip's app list and custom
+    accent color.
+  • Default smart chips (OTPs, Payments, Deliveries, Banking,
+    Messages, Social, System, Starred) cannot be renamed but can be
+    hidden from view via Settings.
+  • Custom user chips appear after default chips, in the order the
+    user arranged them.
+
+───────────────────────────────────────────────
+  FEATURE 3 — PREMIUM APP FILTER PICKER
+───────────────────────────────────────────────
+
+Tapping the "+" chip opens a full-screen premium app picker.
+
+  • Full-screen sheet with ambient mesh and glass panels.
+  • Header: "Build a filter" with a back button and a Done pill.
+  • Search bar at the top — glass pill, instant search across all
+    installed apps, matches on app name AND package.
+  • Filter chips right under the search bar, horizontally
+    scrollable, at least three:
+        All Apps · User Apps · System Apps
+    Selected chip uses the accent gradient fill.
+    Only apps matching the filter are shown.
+  • App list below:
+      - Each row: real app icon (AppIconOrb style), real app name
+        (from AppInfoResolver), package name in mono caption below.
+      - A checkbox on the right, animated accent fill when selected.
+      - Row tap toggles selection with haptic + spring.
+      - Select all / deselect all for the current filter as a small
+        glass pill at the top-right of the list.
+      - Selected count is shown live in the Done pill.
+  • Below the list, always visible:
+      - A "Name this filter" text field (glass, live preview).
+      - A color picker row (12 curated accent swatches).
+      - Save button (accent gradient pill) — disabled until at
+        least one app is selected AND a name is entered.
+  • On save: chip is created, list animates in with spring, chip
+    plays a small bloom, haptic double-tick, and it becomes active.
+
+───────────────────────────────────────────────
+  FEATURE 4 — EXCLUDE RULES IN SETTINGS
+───────────────────────────────────────────────
+
+Add a full "Exclusion Rules" section in Settings → Capture.
+
+The user must be able to exclude notifications from being captured
+or shown, by many rules. All rules are additive — if any rule
+matches, the notification is excluded.
+
+4.1  EXCLUDE BY APP
+  • Multi-select app list using the same premium app picker as
+    Feature 3 (with search + User/System/All filter chips).
+  • Excluded apps are visually marked with a muted, struck-through
+    style in the picker.
+
+4.2  EXCLUDE BY EXACT MESSAGE TEXT
+  • A list of exact strings. If a notification's text OR bigText OR
+    title contains any of these exact strings, it is excluded.
+  • Add rule via a glass input sheet with:
+      - A text field
+      - Match type: Contains / Starts with / Ends with / Regex
+      - Case sensitivity toggle
+      - Live preview: shows how many of the last 500 notifications
+        would be excluded by this rule
+  • Each rule is a glass row with an enable toggle and an edit /
+    delete swipe.
+
+4.3  EXCLUDE BY KEYWORD
+  • Same as above but for single keywords.
+
+4.4  EXCLUDE BY REGEX
+  • Power-user option. Validate regex live and show a preview of
+    matches from the last 500 notifications.
+
+4.5  EXCLUDE BY CATEGORY
+  • Checkboxes for: OTP, Payment, Delivery, Banking, Social, System,
+    Promotions, Ongoing, Group Summary.
+  • Ongoing notifications excluded by default (they clutter).
+
+4.6  EXCLUDE BY PRIORITY
+  • Slider: Exclude notifications with priority below X.
+  • Shows the Android priority scale with labels.
+
+4.7  EXCLUDE BY TIME
+  • Quiet hours: exclude between X and Y time. Uses a beautiful
+    custom time range picker.
+  • Day-of-week selection chips.
+
+4.8  EXCLUDE BY REPEAT
+  • "Exclude if identical notification received within N minutes."
+  • Slider, default 0 (off).
+
+4.9  EXCLUDE ONGOING / MEDIA / SYSTEM
+  • Separate toggles for each — many users want to hide these.
+
+4.10 MASTER TOGGLE
+  • A big, reassuring card at the top: "Capture Filtering: ON"
+    with a live count of "X notifications excluded today."
+  • Tapping it opens a live log of recently excluded notifications
+    (so the user can verify their rules work as intended).
+
+Every exclude rule is stored in Room, cached in memory, and applied
+at capture time in the NotificationListenerService BEFORE insert.
+
+───────────────────────────────────────────────
+  FEATURE 5 — DASHBOARD APP QUICK-CHIPS
+───────────────────────────────────────────────
+
+Add a horizontal row of "App Quick-Chips" on the dashboard, right
+under the stat pills and above the filter chips.
+
+5.1  INITIAL SETUP — CHOOSING THE FIRST 6
+  • On first app launch (after lock setup), show a premium full-
+    screen dialog: "Pick up to 6 apps you check the most."
+  • Uses the same premium app picker (search + User/System/All
+    chips + real icons + real names).
+  • Counter shows "3 / 6 selected". Enforces the max of 6.
+  • Can be skipped — but the row will just be empty until the user
+    adds apps later.
+
+5.2  THE ROW ON THE DASHBOARD
+  • Horizontally scrollable, edge fade gradients.
+  • Each chip shows the real app icon (AppIconOrb, small) + real
+    app name. Selected chip gets accent gradient fill + glow.
+  • Tapping a chip filters the vault to only that app's
+    notifications — instantly, with a spring scroll to the top.
+  • Tapping the active chip again clears the filter.
+
+5.3  THE APP PICKER BUTTON BEFORE THE FIRST CHIP
+  • Before the first quick-chip, always show an app-picker button —
+    a glass circle with an app-grid icon in accent color.
+  • Tapping it opens the premium app picker (same one as Feature 3)
+    in "single-select" mode.
+  • The chosen app is added to the row temporarily, becomes active,
+    and its notifications are shown. It does NOT persist unless the
+    user long-presses it and chooses "Pin to quick-chips".
+  • This lets the user do a one-off "show me notifications from
+    this app" without polluting their permanent quick-chip list.
+
+5.4  REORDERING AND REMOVING
+  • Long-press a quick-chip → enter drag-to-reorder mode with a
+    spring lift and haptic.
+  • Swipe a chip up while holding → remove it (with a soft
+    crimson glow reveal and a confirmation mini-sheet).
+
+───────────────────────────────────────────────
+  FEATURE 6 — CONTEXTUAL SEARCH
+───────────────────────────────────────────────
+
+The search bar currently searches everything. It must now be
+context-aware.
+
+  • If a quick-chip or filter chip is ACTIVE, the search bar only
+    searches within that subset.
+  • The search bar's placeholder changes to reflect this:
+      No filter:      "Search everything…"
+      App filter:     "Search WhatsApp…"
+      Custom filter:  "Search 'Banking alerts'…"
+  • A small "clear filter" pill appears inside the search bar (or
+    just below it) so the user can widen the search to everything
+    in one tap.
+  • Empty state adapts:
+      "No matches in WhatsApp. Search everything instead?"
+      with a glass pill button that widens the scope.
+  • All search syntax (app:, has:otp, amount:>500, etc.) still works,
+    but is applied within the active context first.
+
+───────────────────────────────────────────────
+  FEATURE 7 — PREMIUM APP PICKER (shared component)
+───────────────────────────────────────────────
+
+This component is used by Features 3, 4.1, 5.1, and 5.3. Build it
+ONCE, as a reusable composable, with these modes:
+
+  • Multi-select with a max limit (used by Feature 5.1, limit 6)
+  • Multi-select unlimited (used by Feature 3 and 4.1)
+  • Single-select (used by Feature 5.3)
+
+Every mode shares:
+  • Search bar (glass pill, instant search on app name + package)
+  • Filter chips: All Apps · User Apps · System Apps (scrollable)
+  • Real app icon + real app name + package in mono caption
+  • Animated checkbox / radio
+  • Selected-count live in the confirm pill
+  • Loading state: shimmer rows while PackageManager is queried
+  • Empty state: "No apps match 'xyz'" with a reset filter pill
+  • All querying runs on Dispatchers.IO — never blocks the UI
+
+───────────────────────────────────────────────
+  FINAL CHECKLIST BEFORE YOU FINISH
+───────────────────────────────────────────────
+
+  □ Lock system: PIN, Password, Pattern, Biometric — all working.
+  □ Auto-lock on cold start, on timeout, on screen off, on reboot.
+  □ FLAG_SECURE + branded blur on the recents screenshot.
+  □ Changing the lock requires the old credential.
+  □ Turning the lock off requires the current credential + "DISABLE".
+  □ All lock toggles present in Settings → Privacy & Security.
+  □ Filter chip row is scrollable with edge fades.
+  □ "+" chip is always pinned at the end.
+  □ User-created chips are renameable, editable, recolorable,
+    reorderable, duplicable, deletable.
+  □ Premium app picker built once, used everywhere, with search +
+    User/System/All chips, real icons, real names.
+  □ Exclude rules: by app, by exact text, by keyword, by regex,
+    by category, by priority, by time, by repeat, by type.
+  □ Exclude master toggle + live count + recent-exclusions log.
+  □ Dashboard quick-chips row with app picker button before the
+    first chip, temporary add, pin-to-persist, drag reorder.
+  □ First-launch dialog to pick up to 6 quick-chips.
+  □ Contextual search — scoped to the active chip, adaptive
+    placeholder, clear-filter pill, adaptive empty state.
+  □ Everything runs on Dispatchers.IO where it touches disk or
+    PackageManager.
+  □ Every new screen matches the Obsidian Glass design system.
+
+Now build all seven features, complete, in Kotlin + Compose, using
+the exact design tokens already established. Output file by file,
+and say "CONTINUE?" if you hit a length limit.

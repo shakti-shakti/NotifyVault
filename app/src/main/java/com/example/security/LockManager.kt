@@ -50,26 +50,29 @@ class LockManager(private val context: Context) {
     val hideRecentsFlow: StateFlow<Boolean> = _hideRecentsFlow.asStateFlow()
 
     private fun createPreferences(): SharedPreferences {
-        return try {
-            val masterKey = MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            EncryptedSharedPreferences.create(
-                context,
-                "notify_vault_secure_prefs",
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-        } catch (e: Exception) {
-            context.getSharedPreferences("notify_vault_secure_prefs_fallback", Context.MODE_PRIVATE)
-        }
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            context,
+            "notify_vault_secure_prefs",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
     }
 
     fun isLockConfigured(): Boolean {
         val method = getLockMethod()
         val hash = prefs.getString(KEY_HASH, null)
         return method != LockMethod.NONE && !hash.isNullOrBlank()
+    }
+
+    fun isInitialSetupComplete(): Boolean =
+        prefs.getBoolean(KEY_INITIAL_SETUP_COMPLETE, false)
+
+    fun markInitialSetupComplete() {
+        prefs.edit().putBoolean(KEY_INITIAL_SETUP_COMPLETE, true).apply()
     }
 
     fun getLockMethod(): LockMethod {
@@ -114,10 +117,10 @@ class LockManager(private val context: Context) {
         prefs.edit().putBoolean(KEY_BLUR_SENSITIVE, enabled).apply()
     }
 
-    private var lastPausedTime: Long = 0L
+    fun getPinLength(): Int = prefs.getInt(KEY_PIN_LENGTH, 4).coerceIn(4, 6)
 
     fun recordAppPaused() {
-        lastPausedTime = System.currentTimeMillis()
+        prefs.edit().putLong(KEY_LAST_PAUSED_AT, System.currentTimeMillis()).apply()
         if (isLockOnAppClose() && isLockConfigured()) {
             lock()
         }
@@ -128,7 +131,8 @@ class LockManager(private val context: Context) {
         if (_isLocked.value) return true
         val timeout = getAutoLockTimeout()
         if (timeout == 0L) return true
-        if (timeout > 0 && lastPausedTime > 0) {
+        val lastPausedTime = prefs.getLong(KEY_LAST_PAUSED_AT, 0L)
+        if (timeout > 0 && lastPausedTime > 0L) {
             val elapsed = System.currentTimeMillis() - lastPausedTime
             if (elapsed >= timeout) return true
         }
@@ -143,6 +147,7 @@ class LockManager(private val context: Context) {
 
     fun unlock() {
         _isLocked.value = false
+        prefs.edit().remove(KEY_LAST_PAUSED_AT).apply()
         resetFailedAttempts()
     }
 
@@ -166,6 +171,14 @@ class LockManager(private val context: Context) {
     }
 
     fun setCredential(method: LockMethod, input: String) {
+        require(
+            when (method) {
+                LockMethod.PIN -> input.length in 4..6 && input.all(Char::isDigit)
+                LockMethod.PASSWORD -> input.length >= 4
+                LockMethod.PATTERN -> input.split("-").size >= 4
+                LockMethod.NONE -> false
+            }
+        ) { "Invalid lock credential" }
         val salt = generateSalt()
         val saltStr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Base64.getEncoder().encodeToString(salt)
@@ -178,6 +191,7 @@ class LockManager(private val context: Context) {
             .putString(KEY_METHOD, method.name)
             .putString(KEY_SALT, saltStr)
             .putString(KEY_HASH, hash)
+            .putInt(KEY_PIN_LENGTH, if (method == LockMethod.PIN) input.length else 0)
             .putInt(KEY_FAILED_ATTEMPTS, 0)
             .putLong(KEY_COOLDOWN_UNTIL, 0L)
             .apply()
@@ -186,6 +200,7 @@ class LockManager(private val context: Context) {
     }
 
     fun verifyCredential(input: String): Boolean {
+        if (getCooldownStatus() !is CooldownStatus.None) return false
         val saltStr = prefs.getString(KEY_SALT, null) ?: return false
         val expectedHash = prefs.getString(KEY_HASH, null) ?: return false
 
@@ -196,7 +211,10 @@ class LockManager(private val context: Context) {
         }
 
         val actualHash = hashWithSalt(input, salt)
-        val matches = actualHash == expectedHash
+        val matches = java.security.MessageDigest.isEqual(
+            actualHash.toByteArray(Charsets.UTF_8),
+            expectedHash.toByteArray(Charsets.UTF_8)
+        )
 
         if (matches) {
             resetFailedAttempts()
@@ -222,6 +240,7 @@ class LockManager(private val context: Context) {
             .putString(KEY_METHOD, LockMethod.NONE.name)
             .remove(KEY_HASH)
             .remove(KEY_SALT)
+            .remove(KEY_PIN_LENGTH)
             .putBoolean(KEY_BIOMETRIC, false)
             .apply()
 
@@ -332,8 +351,10 @@ class LockManager(private val context: Context) {
     companion object {
         private const val KEY_IS_LOCKED_INIT = "key_is_locked_init"
         private const val KEY_METHOD = "key_lock_method"
+        private const val KEY_INITIAL_SETUP_COMPLETE = "key_initial_setup_complete"
         private const val KEY_HASH = "key_credential_hash"
         private const val KEY_SALT = "key_credential_salt"
+        private const val KEY_PIN_LENGTH = "key_pin_length"
         private const val KEY_BIOMETRIC = "key_biometric_enabled"
         private const val KEY_AUTO_LOCK_TIMEOUT = "key_auto_lock_timeout"
         private const val KEY_LOCK_ON_SCREEN_OFF = "key_lock_on_screen_off"
@@ -342,6 +363,7 @@ class LockManager(private val context: Context) {
         private const val KEY_BLUR_SENSITIVE = "key_blur_sensitive"
         private const val KEY_FAILED_ATTEMPTS = "key_failed_attempts"
         private const val KEY_COOLDOWN_UNTIL = "key_cooldown_until"
+        private const val KEY_LAST_PAUSED_AT = "key_last_paused_at"
 
         @Volatile
         private var instance: LockManager? = null

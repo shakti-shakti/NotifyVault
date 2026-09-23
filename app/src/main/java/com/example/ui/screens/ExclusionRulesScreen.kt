@@ -81,6 +81,7 @@ import com.example.ui.theme.VaultCaption
 import com.example.ui.theme.VaultLabel
 import com.example.ui.theme.VaultTitle
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -99,6 +100,7 @@ fun ExclusionRulesScreen(
     val textRules by repo.textRules.collectAsState()
     val excludedCategories by repo.excludedCategories.collectAsState()
     val minPriority by repo.minPriority.collectAsState()
+    val excludedDays by repo.excludedDays.collectAsState()
     val quietHoursEnabled by repo.isQuietHoursEnabled.collectAsState()
     val quietHoursStartMin by repo.quietHoursStartMinute.collectAsState()
     val quietHoursEndMin by repo.quietHoursEndMinute.collectAsState()
@@ -352,6 +354,91 @@ fun ExclusionRulesScreen(
 
                 // 5. QUIET HOURS (TIME RANGE)
                 item {
+                    GlassCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Minimum Priority", style = VaultTitle.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
+                                    Text(
+                                        if (minPriority <= -2) "Allow every notification priority" else "Exclude notifications below $minPriority",
+                                        style = VaultCaption.copy(color = colors.textTertiary)
+                                    )
+                                }
+                                Text(
+                                    if (minPriority <= -2) "ALL" else minPriority.toString(),
+                                    style = VaultLabel.copy(color = colors.accent.base, fontWeight = FontWeight.Bold)
+                                )
+                            }
+                            Slider(
+                                value = minPriority.toFloat(),
+                                onValueChange = { repo.setMinPriority(it.roundToInt()) },
+                                valueRange = -2f..5f,
+                                steps = 6,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = colors.accent.base,
+                                    activeTrackColor = colors.accent.base,
+                                    inactiveTrackColor = colors.surface
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // 6. EXCLUDE BY DAY OF WEEK
+                item {
+                    val days = listOf(
+                        Calendar.SUNDAY to "Sun",
+                        Calendar.MONDAY to "Mon",
+                        Calendar.TUESDAY to "Tue",
+                        Calendar.WEDNESDAY to "Wed",
+                        Calendar.THURSDAY to "Thu",
+                        Calendar.FRIDAY to "Fri",
+                        Calendar.SATURDAY to "Sat"
+                    )
+                    GlassCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Excluded Days", style = VaultTitle.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
+                            Text(
+                                if (excludedDays.isEmpty()) "Every day" else "${excludedDays.size} days excluded",
+                                style = VaultCaption.copy(color = colors.textTertiary)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                days.forEach { (day, label) ->
+                                    val selected = excludedDays.contains(day)
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(ShapePill)
+                                            .background(if (selected) colors.accent.base.copy(alpha = 0.25f) else colors.surface)
+                                            .border(1.dp, if (selected) colors.accent.base else colors.cardStroke, ShapePill)
+                                            .clickable {
+                                                repo.setExcludedDays(
+                                                    if (selected) excludedDays - day else excludedDays + day
+                                                )
+                                            }
+                                            .padding(horizontal = 7.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            label,
+                                            style = VaultCaption.copy(
+                                                fontSize = 10.sp,
+                                                color = if (selected) colors.accent.base else colors.textSecondary,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 7. QUIET HOURS (TIME RANGE)
+                item {
                     GlassCard(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = { showQuietHoursDialog = true }
@@ -380,7 +467,7 @@ fun ExclusionRulesScreen(
                     }
                 }
 
-                // 6. DUPLICATE NOTIFICATION REPEAT WINDOW
+                // 8. DUPLICATE NOTIFICATION REPEAT WINDOW
                 item {
                     GlassCard(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp)) {
@@ -415,7 +502,7 @@ fun ExclusionRulesScreen(
                     }
                 }
 
-                // 7. ONGOING, MEDIA, SYSTEM TOGGLES
+                // 9. ONGOING, MEDIA, SYSTEM TOGGLES
                 item {
                     GlassCard(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {

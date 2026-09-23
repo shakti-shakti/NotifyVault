@@ -102,6 +102,7 @@ fun SettingsScreen(
 
     var showChangeLockFlow by remember { mutableStateOf(false) }
     var showDisableLockDialog by remember { mutableStateOf(false) }
+    var showLockSetup by remember { mutableStateOf(false) }
     var showTimeoutMenu by remember { mutableStateOf(false) }
     var showPanicDialog by remember { mutableStateOf(false) }
     var showEmergencyWipeDialog by remember { mutableStateOf(false) }
@@ -110,6 +111,16 @@ fun SettingsScreen(
     var lockOnAppClose by remember { mutableStateOf(lockManager.isLockOnAppClose()) }
     var blurSensitiveContent by remember { mutableStateOf(lockManager.isBlurSensitiveContent()) }
     var currentTimeoutMs by remember { mutableStateOf(lockManager.getAutoLockTimeout()) }
+
+    if (showLockSetup) {
+        LockSetupScreen(
+            onSetupComplete = {
+                lockManager.markInitialSetupComplete()
+                showLockSetup = false
+            }
+        )
+        return
+    }
 
     if (showChangeLockFlow) {
         ChangeLockFlow(onDismiss = { showChangeLockFlow = false })
@@ -438,6 +449,15 @@ fun SettingsScreen(
                                         )
                                     }
                                 }
+                            } else {
+                                Text(
+                                    text = "Enable",
+                                    style = VaultCaption.copy(color = colors.accent.base, fontWeight = FontWeight.Bold),
+                                    modifier = Modifier
+                                        .clip(ShapePill)
+                                        .clickable { showLockSetup = true }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
                             }
                         }
 

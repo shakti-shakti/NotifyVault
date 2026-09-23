@@ -106,6 +106,16 @@ class FilterChipRepository private constructor(context: Context) {
         saveCustomChips(current)
     }
 
+    fun moveCustomChip(id: String, direction: Int) {
+        val current = _customChips.value.toMutableList()
+        val index = current.indexOfFirst { it.id == id }
+        val target = index + direction
+        if (index < 0 || target !in current.indices) return
+        val item = current.removeAt(index)
+        current.add(target, item)
+        saveCustomChips(current.mapIndexed { position, chip -> chip.copy(orderIndex = position) })
+    }
+
     fun hideBuiltInChip(name: String) {
         val current = _hiddenBuiltInChips.value.toMutableSet()
         current.add(name)

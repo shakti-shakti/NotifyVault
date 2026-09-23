@@ -1,0 +1,1 @@
+- [Vault lock security](vault-lock-security.md) — Lock credentials stay encrypted and salted; lock boundaries include cold start, background timeout, screen off, and reboot.

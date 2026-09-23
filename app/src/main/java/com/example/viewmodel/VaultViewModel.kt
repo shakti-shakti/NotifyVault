@@ -20,6 +20,7 @@ import com.example.data.NotificationEntity
 import com.example.data.NotificationRepository
 import com.example.data.VaultDatabase
 import com.example.service.NotifyVaultNotificationListenerService
+import com.example.security.LockManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -113,7 +114,9 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
 
     // App Lock State
-    private val _isVaultLocked = MutableStateFlow(false)
+    private val _isVaultLocked = MutableStateFlow(
+        LockManager.getInstance(application).isLockConfigured()
+    )
     val isVaultLocked: StateFlow<Boolean> = _isVaultLocked.asStateFlow()
 
     // Live Capture Service Active
@@ -143,14 +146,14 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     val todayCount = repository.getTodayCount(getTodayStartMillis())
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    // Real Notification List according to active filter, quick-chip, and search query
-    val notifications: StateFlow<List<NotificationEntity>> = combine(
+    // Real Notification List according to active filter, quick-chip, contextual
+    // search scope, date range, type chips, and power syntax.
+    private val baseNotifications = combine(
         repository.activeNotifications,
         _selectedFilter,
         _selectedAppPackage,
-        _selectedCustomChip,
-        _searchQuery
-    ) { all, filter, appPkg, customChip, query ->
+        _selectedCustomChip
+    ) { all, filter, appPkg, customChip ->
         var list = all
 
         // 1. Dashboard App Quick-Chip filtering
@@ -187,15 +190,78 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // 3. Search query
+        list
+    }
+
+    val notifications: StateFlow<List<NotificationEntity>> = combine(
+        baseNotifications,
+        _searchQuery,
+        _searchSelectedApp,
+        _searchDateRange,
+        _searchTypeFilters
+    ) { source, query, searchApp, dateRange, typeFilters ->
+        var list = source
+
+        if (searchApp != null) {
+            list = list.filter { it.packageName == searchApp }
+        }
+
+        val dayMillis = 24 * 60 * 60 * 1000L
+        val todayStart = getTodayStartMillis()
+        list = when (dateRange) {
+            DateRangeFilter.TODAY -> list.filter { it.captureTime >= todayStart }
+            DateRangeFilter.YESTERDAY -> list.filter {
+                it.captureTime in (todayStart - dayMillis) until todayStart
+            }
+            DateRangeFilter.LAST_7_DAYS -> list.filter {
+                it.captureTime >= todayStart - (6 * dayMillis)
+            }
+            DateRangeFilter.ALL -> list
+        }
+
+        if (typeFilters.isNotEmpty()) {
+            list = list.filter { item ->
+                typeFilters.all { type ->
+                    when (type) {
+                        "OTP" -> item.hasOtp || item.category.equals("OTP", ignoreCase = true)
+                        "Amounts" -> item.hasAmount
+                        "Starred" -> item.isStarred
+                        else -> true
+                    }
+                }
+            }
+        }
+
         if (query.isNotBlank()) {
-            val q = query.trim().lowercase()
-            list = list.filter {
-                it.title?.lowercase()?.contains(q) == true ||
-                it.text?.lowercase()?.contains(q) == true ||
-                it.appName.lowercase().contains(q) ||
-                it.otpCode?.contains(q) == true ||
-                it.senderName?.lowercase()?.contains(q) == true
+            val tokens = query.trim().lowercase().split(Regex("\\s+"))
+            val appSyntax = tokens.firstOrNull { it.startsWith("app:") }?.removePrefix("app:")
+            if (!appSyntax.isNullOrBlank()) {
+                list = list.filter {
+                    it.appName.contains(appSyntax, ignoreCase = true) ||
+                        it.packageName.contains(appSyntax, ignoreCase = true)
+                }
+            }
+            if (tokens.any { it == "has:otp" }) {
+                list = list.filter { it.hasOtp || it.category.equals("OTP", ignoreCase = true) }
+            }
+            if (tokens.any { it == "has:amount" }) {
+                list = list.filter { it.hasAmount }
+            }
+            if (tokens.any { it == "is:starred" }) {
+                list = list.filter { it.isStarred }
+            }
+
+            val freeText = tokens
+                .filterNot { it == "has:otp" || it == "has:amount" || it == "is:starred" || it.startsWith("app:") || it.startsWith("amount:") }
+                .joinToString(" ")
+            if (freeText.isNotBlank()) {
+                list = list.filter {
+                    it.title?.contains(freeText, ignoreCase = true) == true ||
+                        it.text?.contains(freeText, ignoreCase = true) == true ||
+                        it.appName.contains(freeText, ignoreCase = true) ||
+                        it.otpCode?.contains(freeText) == true ||
+                        it.senderName?.contains(freeText, ignoreCase = true) == true
+                }
             }
         }
         list
@@ -224,6 +290,13 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSearchSelectedApp(pkg: String?) {
         _searchSelectedApp.value = if (_searchSelectedApp.value == pkg) null else pkg
+    }
+
+    fun clearSearchFilters() {
+        _searchQuery.value = ""
+        _searchSelectedApp.value = null
+        _searchDateRange.value = DateRangeFilter.ALL
+        _searchTypeFilters.value = emptySet()
     }
 
     // 100% REAL ANALYTICS CALCULATED FROM REAL NOTIFICATIONS:

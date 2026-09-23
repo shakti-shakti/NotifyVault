@@ -41,6 +41,8 @@ import androidx.compose.ui.window.Dialog
 import com.example.security.LockManager
 import com.example.security.LockMethod
 import com.example.ui.components.GlassCard
+import com.example.ui.components.LockKeypad
+import com.example.ui.components.PatternLockView
 import com.example.ui.theme.CrimsonPalette
 import com.example.ui.theme.DisplayM
 import com.example.ui.theme.LocalVaultColors
@@ -59,6 +61,7 @@ fun DisableLockDialog(
     val context = LocalContext.current
     val lockManager = remember { LockManager.getInstance(context) }
     val currentMethod = lockManager.getLockMethod()
+    val currentPinLength = remember(currentMethod) { lockManager.getPinLength() }
 
     var credentialInput by remember { mutableStateOf("") }
     var confirmationWord by remember { mutableStateOf("") }
@@ -115,32 +118,53 @@ fun DisableLockDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(ShapePill)
-                        .background(colors.surface)
-                        .border(1.dp, colors.cardStroke, ShapePill)
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                ) {
-                    BasicTextField(
-                        value = credentialInput,
-                        onValueChange = {
-                            credentialInput = it
-                            errorMessage = null
-                        },
-                        visualTransformation = PasswordVisualTransformation(),
-                        textStyle = TextStyle(color = colors.textPrimary, fontSize = 14.sp, fontFamily = FontFamily.Monospace),
-                        cursorBrush = SolidColor(colors.accent.base),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        decorationBox = { inner ->
-                            if (credentialInput.isEmpty()) {
-                                Text("Current ${currentMethod.title}…", style = VaultBodyM.copy(fontSize = 12.sp, color = colors.textTertiary))
+                when (currentMethod) {
+                    LockMethod.PIN -> LockKeypad(
+                        pinLength = currentPinLength,
+                        currentLength = credentialInput.length,
+                        onDigitClick = { digit ->
+                            if (credentialInput.length < currentPinLength) {
+                                credentialInput += digit
+                                errorMessage = null
                             }
-                            inner()
+                        },
+                        onDeleteClick = {
+                            if (credentialInput.isNotEmpty()) credentialInput = credentialInput.dropLast(1)
                         }
                     )
+                    LockMethod.PATTERN -> PatternLockView(
+                        onPatternComplete = {
+                            credentialInput = it
+                            errorMessage = null
+                        }
+                    )
+                    else -> Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(ShapePill)
+                            .background(colors.surface)
+                            .border(1.dp, colors.cardStroke, ShapePill)
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        BasicTextField(
+                            value = credentialInput,
+                            onValueChange = {
+                                credentialInput = it
+                                errorMessage = null
+                            },
+                            visualTransformation = PasswordVisualTransformation(),
+                            textStyle = TextStyle(color = colors.textPrimary, fontSize = 14.sp, fontFamily = FontFamily.Monospace),
+                            cursorBrush = SolidColor(colors.accent.base),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            decorationBox = { inner ->
+                                if (credentialInput.isEmpty()) {
+                                    Text("Current ${currentMethod.title}…", style = VaultBodyM.copy(fontSize = 12.sp, color = colors.textTertiary))
+                                }
+                                inner()
+                            }
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
