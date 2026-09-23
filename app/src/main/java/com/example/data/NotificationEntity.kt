@@ -13,7 +13,11 @@ import androidx.room.PrimaryKey
         Index(value = ["isStarred"]),
         Index(value = ["isArchived"]),
         Index(value = ["hasOtp"]),
-        Index(value = ["hasAmount"])
+        Index(value = ["hasAmount"]),
+        Index(value = ["fingerprintKey"]),
+        Index(value = ["contentHash"]),
+        Index(value = ["lastSeenAt"]),
+        Index(value = ["fingerprintKey", "lastSeenAt"])
     ]
 )
 data class NotificationEntity(
@@ -69,5 +73,10 @@ data class NotificationEntity(
     val deepLinkUri: String? = null,
     val deepLinkSource: String? = null,
     val deepLinkConfidence: String? = null,
-    val rawExtrasJson: String = "{}"
+    val rawExtrasJson: String = "{}",
+    val fingerprintKey: String = "",
+    val contentHash: String = "",
+    val lastSeenAt: Long = captureTime,
+    val updateCount: Int = 1,
+    val isUpdate: Boolean = false
 )

@@ -25,6 +25,8 @@ class NotificationRepository(private val dao: NotificationDao) {
 
     fun getById(id: Long): Flow<NotificationEntity?> = dao.getById(id)
 
+    fun getHistory(id: Long): Flow<List<NotificationHistoryEntity>> = dao.getHistory(id)
+
     suspend fun insert(notification: NotificationEntity): Long = dao.insert(notification)
 
     suspend fun setStarred(id: Long, isStarred: Boolean) = dao.setStarred(id, isStarred)
@@ -45,7 +47,11 @@ class NotificationRepository(private val dao: NotificationDao) {
 
     companion object {
         // Smart tag parsing logic for incoming notifications
-        private val OTP_REGEX = Pattern.compile("\\b(\\d{4,8})\\b")
+        private val OTP_REGEX = Pattern.compile("(?<!\\d)(\\d{4}|\\d{6}|\\d{8})(?!\\d)")
+        private val OTP_KEYWORD_REGEX = Pattern.compile(
+            "\\b(otp|one[- ]?time password|verification code|verify code|security code|auth(?:entication)? code|login code|sign[- ]in code|confirmation code|passcode|pin|code)\\b",
+            Pattern.CASE_INSENSITIVE
+        )
         private val AMOUNT_REGEX = Pattern.compile("(?:₹|Rs\\.?|\\$|€|£|INR)\\s?([0-9,]+(?:\\.[0-9]{1,2})?)", Pattern.CASE_INSENSITIVE)
         private val LINK_REGEX = Pattern.compile("https?://[^\\s]+", Pattern.CASE_INSENSITIVE)
 
@@ -67,15 +73,16 @@ class NotificationRepository(private val dao: NotificationDao) {
             // Check OTP
             var hasOtp = false
             var otpCode: String? = null
-            if (fullContent.contains("otp", ignoreCase = true) ||
-                fullContent.contains("code", ignoreCase = true) ||
-                fullContent.contains("verification", ignoreCase = true) ||
-                fullContent.contains("password", ignoreCase = true)
-            ) {
-                val matcher = OTP_REGEX.matcher(fullContent)
-                if (matcher.find()) {
+            if (OTP_KEYWORD_REGEX.matcher(fullContent).find()) {
+                val matches = OTP_REGEX.matcher(fullContent)
+                val candidates = mutableListOf<String>()
+                while (matches.find()) candidates += matches.group(1)
+                val detected = candidates.firstOrNull { it.length == 6 }
+                    ?: candidates.firstOrNull { it.length == 8 }
+                    ?: candidates.firstOrNull { it.length == 4 }
+                if (detected != null) {
                     hasOtp = true
-                    otpCode = matcher.group(1)
+                    otpCode = detected
                 }
             }
 

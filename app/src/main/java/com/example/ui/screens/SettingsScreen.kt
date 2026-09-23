@@ -311,6 +311,11 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(14.dp))
 
             // 2. PRIVACY & SECURITY
+            FeaturePackSettings(viewModel.featurePreferences)
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 3. PRIVACY & SECURITY
             Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                 Text(
                     text = "PRIVACY & SECURITY",

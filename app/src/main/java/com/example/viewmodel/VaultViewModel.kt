@@ -18,6 +18,7 @@ import com.example.R
 import com.example.data.CustomFilterChip
 import com.example.data.NotificationEntity
 import com.example.data.NotificationRepository
+import com.example.data.NotificationFeaturePreferences
 import com.example.data.VaultDatabase
 import com.example.service.NotifyVaultNotificationListenerService
 import com.example.service.LiveNotificationRegistry
@@ -54,6 +55,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: NotificationRepository
     private val database = VaultDatabase.getInstance(application)
+    val featurePreferences = NotificationFeaturePreferences.getInstance(application)
     private val liveRegistry = LiveNotificationRegistry.getInstance()
     private val replayEngine = ReplayEngine.getInstance(application)
     val liveNotificationKeys: StateFlow<Set<String>> = liveRegistry.liveKeys
@@ -459,6 +461,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     fun lockVault() {
         _isVaultLocked.value = true
+        com.example.data.OtpCatcherPreferences.getInstance(getApplication()).clearLog()
     }
 
     fun unlockVault() {
@@ -466,6 +469,8 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getNotificationById(id: Long) = repository.getById(id)
+
+    fun getNotificationHistory(id: Long) = repository.getHistory(id)
 
     fun replay(notification: NotificationEntity): ReplayResult =
         replayEngine.replay(notification)

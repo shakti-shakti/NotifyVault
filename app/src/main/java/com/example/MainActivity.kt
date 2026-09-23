@@ -3,6 +3,8 @@ package com.example
 import android.os.Bundle
 import android.content.Intent
 import android.content.IntentFilter
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -28,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.ContextCompat
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.data.FilterChipRepository
 import com.example.ui.components.AppPickerMode
 import com.example.ui.components.AppPickerSheet
@@ -43,6 +46,7 @@ import com.example.ui.screens.LockSetupScreen
 import com.example.ui.screens.SearchScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.ReplayDebugScreen
+import com.example.ui.screens.BatteryOptimizationOnboardingPrompt
 import com.example.ui.theme.LocalVaultColors
 import com.example.ui.theme.LocalVaultCustomization
 import com.example.ui.theme.NotifyVaultTheme
@@ -50,9 +54,18 @@ import com.example.ui.theme.rememberVaultCustomizationState
 import com.example.viewmodel.VaultViewModel
 
 class MainActivity : ComponentActivity() {
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         setContent {
             val customizationState = rememberVaultCustomizationState()
 
@@ -256,5 +269,6 @@ fun NotifyVaultApp(
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
+        BatteryOptimizationOnboardingPrompt(onDismiss = {})
     }
 }

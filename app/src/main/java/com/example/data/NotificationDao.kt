@@ -79,6 +79,18 @@ interface NotificationDao {
     @Update
     suspend fun update(notification: NotificationEntity)
 
+    @Query("SELECT * FROM notifications WHERE fingerprintKey = :fingerprintKey ORDER BY lastSeenAt DESC LIMIT 1")
+    suspend fun getLatestByFingerprintKey(fingerprintKey: String): NotificationEntity?
+
+    @Query("UPDATE notifications SET lastSeenAt = :lastSeenAt WHERE id = :id")
+    suspend fun touchLastSeen(id: Long, lastSeenAt: Long)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertHistory(history: NotificationHistoryEntity)
+
+    @Query("SELECT * FROM notification_history WHERE parentId = :parentId ORDER BY replacedAt DESC")
+    fun getHistory(parentId: Long): Flow<List<NotificationHistoryEntity>>
+
     @Query("UPDATE notifications SET isStarred = :isStarred WHERE id = :id")
     suspend fun setStarred(id: Long, isStarred: Boolean)
 

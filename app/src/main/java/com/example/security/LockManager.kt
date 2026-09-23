@@ -142,6 +142,7 @@ class LockManager(private val context: Context) {
     fun lock() {
         if (isLockConfigured()) {
             _isLocked.value = true
+            com.example.data.OtpCatcherPreferences.getInstance(context).clearLog()
         }
     }
 
@@ -310,6 +311,7 @@ class LockManager(private val context: Context) {
         try {
             // Clear preferences
             prefs.edit().clear().apply()
+            com.example.data.OtpCatcherPreferences.getInstance(context).clearLog()
             // Reset lock state
             _lockMethodFlow.value = LockMethod.NONE
             _biometricEnabledFlow.value = false

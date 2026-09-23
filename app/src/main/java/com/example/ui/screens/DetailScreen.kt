@@ -61,6 +61,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.NotificationEntity
+import com.example.data.NotificationHistoryEntity
 import com.example.data.ReplayExplainerStore
 import com.example.data.ReplayResult
 import com.example.ui.components.ActionCircleButton
@@ -109,6 +110,8 @@ fun DetailScreen(
 
     val notificationFlow = remember(notificationId) { viewModel.getNotificationById(notificationId) }
     val notification by notificationFlow.collectAsStateWithLifecycle(initialValue = null)
+    val history by remember(notificationId) { viewModel.getNotificationHistory(notificationId) }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
     val liveKeys by viewModel.liveNotificationKeys.collectAsStateWithLifecycle()
     val replayStore = remember(context) { ReplayExplainerStore(context) }
     val hasSeenExplainer by replayStore.hasSeen.collectAsStateWithLifecycle(initialValue = false)
@@ -680,6 +683,51 @@ fun DetailScreen(
                                     if (index < parsedMessages.size - 1) {
                                         Spacer(modifier = Modifier.height(12.dp))
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (history.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                    SectionHeader(
+                        title = "History (${history.size})",
+                        isExpanded = true,
+                        onToggle = {}
+                    )
+                    GlassCard(modifier = Modifier.fillMaxWidth(), shape = ShapeL) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            history.forEachIndexed { index, version ->
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = version.previousTitle ?: "Previous version",
+                                            style = VaultTitle.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                                            color = colors.textPrimary
+                                        )
+                                        Text(
+                                            text = SimpleDateFormat("dd MMM · HH:mm", Locale.getDefault())
+                                                .format(Date(version.replacedAt)),
+                                            style = VaultCaption.copy(fontSize = 10.sp, color = colors.textTertiary)
+                                        )
+                                    }
+                                    if (!version.previousText.isNullOrBlank()) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = version.previousText,
+                                            style = VaultBodyM.copy(fontSize = 12.sp),
+                                            color = colors.textSecondary
+                                        )
+                                    }
+                                }
+                                if (index < history.lastIndex) {
+                                    Spacer(modifier = Modifier.height(12.dp))
                                 }
                             }
                         }

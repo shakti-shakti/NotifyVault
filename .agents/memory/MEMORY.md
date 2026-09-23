@@ -1,2 +1,3 @@
 - [Vault lock security](vault-lock-security.md) — Lock credentials stay encrypted and salted; lock boundaries include cold start, background timeout, screen off, and reboot.
 - [Android build tooling](android-build-tooling.md) — Check wrapper and AGP compatibility before relying on local Gradle verification.
+- [Notification capture pipeline](notification-capture-pipeline.md) — Deduplication is serialized before OTP delivery; vault history is persistent while OTP logs remain ephemeral.

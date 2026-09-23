@@ -100,6 +100,7 @@ dependencies {
   implementation(libs.androidx.room.runtime)
   implementation(libs.androidx.biometric)
   implementation(libs.androidx.lifecycle.process)
+  implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.androidx.security.crypto)
   implementation(libs.coil.compose)
   // implementation(libs.converter.moshi)

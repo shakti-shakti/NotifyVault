@@ -1,0 +1,513 @@
+═══════════════════════════════════════════════════════════════════
+  NOTIFYVAULT — FEATURE PACK v3.3
+  "Smart Dedup + Always-On OTP Catcher"
+═══════════════════════════════════════════════════════════════════
+
+Two mandatory upgrades to NotifyVault, both must work 100% of the
+time, in the background, forever, on every app. No exceptions.
+
+  FEATURE A — Duplicate suppression engine
+  FEATURE B — Always-on OTP catcher with emoji notification + copy
+
+Build both fully, in Kotlin + Compose, matching Obsidian Glass.
+Every piece must survive reboots, battery optimizers, and heavy
+apps like WhatsApp, Gmail, and UPI/banking.
+
+Do NOT hand-wave. Do NOT say "add later". Ship code.
+
+
+═══════════════════════════════════════════════════════════════════
+  FEATURE A — DUPLICATE SUPPRESSION ENGINE
+═══════════════════════════════════════════════════════════════════
+
+PROBLEM
+  Some notifications stay in the status bar for hours (ongoing
+  updates, music players, delivery trackers, "X is typing", weather
+  widgets). Some update the SAME key every 1–2 minutes with
+  identical or near-identical content. Our current capture loop
+  stores a new row each time → database fills with thousands of
+  duplicates of the same notification.
+
+GOAL
+  A notification is stored ONCE when it is genuinely new or
+  genuinely changed. If the same notification is re-posted with the
+  same content, do nothing. If the content changes, store a
+  lightweight UPDATE, not a brand-new entry.
+
+───────────────────────────────────────────────
+A.1  NOTIFICATION FINGERPRINT
+───────────────────────────────────────────────
+
+Create NotificationFingerprint.kt.
+
+  data class Fingerprint(
+      val key: String,          // full identity hash
+      val contentHash: String,  // hash of visible content
+      val postedAt: Long,
+      val updateTime: Long
+  )
+
+  object NotificationFingerprint {
+      fun of(sbn: StatusBarNotification): Fingerprint
+  }
+
+  key must be:
+      "${packageName}|${id}|${tag ?: ""}|${userHandle}"
+
+  contentHash must be SHA-256 of a canonical string built from:
+      title
+      text
+      bigText
+      subText
+      summaryText
+      infoText
+      the labels of all actions
+      the data URI (if any)
+      isOngoing
+      isGroupSummary
+      progress (if any)
+
+  Do NOT include postTime or updateTime in the content hash —
+  those change even when content is identical.
+
+  Do NOT include icon bitmaps in the hash — hashing bitmaps is
+  slow. Icons rarely change for a given notification.
+
+───────────────────────────────────────────────
+A.2  DUPLICATE DECISION LOGIC
+───────────────────────────────────────────────
+
+Create NotificationDeduper.kt.
+
+  sealed class DedupDecision {
+      object InsertNew       : DedupDecision()   // brand new
+      object UpdateExisting  : DedupDecision()   // content changed
+      object SkipDuplicate   : DedupDecision()   // exact same
+  }
+
+  class NotificationDeduper @Inject constructor(
+      private val dao: NotificationDao
+  ) {
+      suspend fun decide(fp: Fingerprint): DedupDecision
+  }
+
+  Logic:
+    1. Look up the most recent row with the same `key`.
+    2. If none exists → InsertNew.
+    3. If exists:
+        a) If existing.contentHash == fp.contentHash
+           AND existing is newer than 5 seconds ago
+           → SkipDuplicate. (rapid re-post of same thing)
+        b) If existing.contentHash == fp.contentHash
+           AND existing is older than 5 seconds
+           → SkipDuplicate, BUT bump a `lastSeenAt` column so we
+             know it's still alive.
+        c) If existing.contentHash != fp.contentHash
+           → UpdateExisting. Update the existing row in place
+             (title, text, hash, lastSeenAt, updateTime) and add
+             a row in a `notification_history` table capturing the
+             previous content for audit purposes.
+    4. Return the decision.
+
+───────────────────────────────────────────────
+A.3  SPECIAL CASES
+───────────────────────────────────────────────
+
+  • WhatsApp / Telegram "X is typing…" — usually a chat notification
+    with the SAME key and DIFFERENT text each time. Treat as
+    UpdateExisting ONLY IF the update gap is > 2 minutes. Otherwise
+    SkipDuplicate. Rationale: user does not want 40 rows of
+    "X is typing" for one conversation.
+
+  • Ongoing media players — the SAME key updates every few seconds
+    with a new elapsed time. Rule: if isOngoing == true, only store
+    the FIRST occurrence and NEVER store updates. Add a special
+    flag to collapse all updates.
+
+  • Group summary notifications — collapse updates the same way as
+    ongoing. Only the first is stored.
+
+  • System notifications from "android" package — always treat as
+    InsertNew if the content hash changed, otherwise skip.
+
+  • Deliberate duplicates across apps — two apps with the same
+    text but different packages are DIFFERENT notifications. Never
+    dedupe across packages.
+
+───────────────────────────────────────────────
+A.4  SCHEMA CHANGES
+───────────────────────────────────────────────
+
+Add to NotificationEntity:
+    val fingerprintKey: String        (indexed)
+    val contentHash: String           (indexed)
+    val lastSeenAt: Long              (indexed)
+    val updateCount: Int = 1
+    val isUpdate: Boolean = false
+
+Create NotificationHistoryEntity:
+    val id: Long
+    val parentId: Long                (foreign key to NotificationEntity)
+    val previousTitle: String?
+    val previousText: String?
+    val previousContentHash: String
+    val replacedAt: Long
+
+Add index on (fingerprintKey, lastSeenAt) for fast lookups.
+
+───────────────────────────────────────────────
+A.5  SERVICE WIRING
+───────────────────────────────────────────────
+
+In onNotificationPosted():
+    1. Build Fingerprint.
+    2. Call deduper.decide(fp).
+    3. Based on decision:
+        InsertNew       → insert full row, notify UI.
+        UpdateExisting  → update row, insert history row, notify UI.
+        SkipDuplicate   → bump lastSeenAt silently. No UI event.
+    4. All DB work happens on Dispatchers.IO.
+    5. Insert must complete within 50ms for normal cases.
+       If it takes longer, log it — it means the DAO needs tuning.
+
+───────────────────────────────────────────────
+A.6  UI FEEDBACK
+───────────────────────────────────────────────
+
+  • If isUpdate == true, show a tiny "updated" caption next to the
+    timestamp on the card.
+  • If updateCount > 1, show "updated 4×" as a subtle pill.
+  • Detail screen shows a "History" section listing every previous
+    version with timestamp.
+  • Add a Settings toggle: "Show updates as separate entries"
+    (default OFF).
+
+
+═══════════════════════════════════════════════════════════════════
+  FEATURE B — ALWAYS-ON OTP CATCHER
+═══════════════════════════════════════════════════════════════════
+
+PROBLEM
+  OTPs arrive and vanish while the user is in another app. By the
+  time they open the banking app, the OTP notification is gone or
+  buried. We need to catch every OTP within milliseconds, surface
+  it instantly via OUR OWN notification, and let the user copy it
+  with one tap.
+
+GOAL
+  Whenever ANY notification contains a 4–8 digit OTP-style code,
+  fire OUR OWN high-priority notification showing:
+      • The source app name
+      • The OTP as emoji digits
+      • A "Copy" action that copies and dismisses
+  And DO NOT store our own notification in the vault database.
+
+───────────────────────────────────────────────
+B.1  OTP DETECTION
+───────────────────────────────────────────────
+
+Create OtpDetector.kt.
+
+  data class OtpMatch(
+      val code: String,
+      val sourceApp: String,      // real app name
+      val sourcePackage: String,
+      val matchedKeyword: String
+  )
+
+  object OtpDetector {
+      fun detect(entity: NotificationEntity): OtpMatch?
+  }
+
+  Detection rules — a notification is treated as an OTP if BOTH:
+
+  RULE 1 — contains a code matching one of:
+      \b\d{4}\b   (4-digit, only if a keyword is present)
+      \b\d{6}\b   (6-digit, primary case)
+      \b\d{8}\b   (8-digit)
+
+  RULE 2 — contains at least one keyword (case-insensitive):
+      otp
+      one-time password
+      one time password
+      verification code
+      verify code
+      security code
+      auth code
+      authentication code
+      login code
+      sign-in code
+      confirmation code
+      passcode
+      pin
+      code
+
+  Whitelist of packages ALWAYS treated as OTP sources regardless of
+  keyword (because their content is inherently OTP):
+      com.google.android.gms     (Google)
+      any package containing "bank", "pay", "upi", "wallet"
+      known bank package list (populate from a config)
+
+  Reject false positives:
+      • Codes inside URLs
+      • Codes that are part of a longer digit string (e.g. phone
+        numbers, tracking numbers with 12+ digits)
+      • Codes in notifications from excluded apps (respect user's
+        exclude list)
+      • Codes in notifications already marked as duplicates
+      • Codes the user has seen within the last 60 seconds for the
+        same source app (prevent re-firing)
+
+  If multiple codes are found, prefer the 6-digit one. If two
+  6-digit codes, take the first one.
+
+───────────────────────────────────────────────
+B.2  EMOJI DIGIT CONVERTER
+───────────────────────────────────────────────
+
+Create EmojiDigits.kt.
+
+  object EmojiDigits {
+      private val MAP = mapOf(
+          '0' to "\u0030\uFE0F\u20E3",
+          '1' to "\u0031\uFE0F\u20E3",
+          '2' to "\u0032\uFE0F\u20E3",
+          '3' to "\u0033\uFE0F\u20E3",
+          '4' to "\u0034\uFE0F\u20E3",
+          '5' to "\u0035\uFE0F\u20E3",
+          '6' to "\u0036\uFE0F\u20E3",
+          '7' to "\u0037\uFE0F\u20E3",
+          '8' to "\u0038\uFE0F\u20E3",
+          '9' to "\u0039\uFE0F\u20E3"
+      )
+      fun convert(code: String): String =
+          code.map { MAP[it] ?: it.toString() }.joinToString("")
+  }
+
+  Example output for "123456":
+      1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣
+  With thin spaces between digits for readability if the platform
+  renders the keycaps too tightly:
+      "1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 6️⃣"
+
+───────────────────────────────────────────────
+B.3  OUR OTP NOTIFICATION
+───────────────────────────────────────────────
+
+Create OtpNotifier.kt.
+
+  fun show(match: OtpMatch)
+
+  Notification spec:
+    • Channel: "otp_catcher"
+        name: "OTP Catcher"
+        importance: IMPORTANCE_HIGH
+        sound: default
+        vibration: short-short pattern
+        lockscreenVisibility: VISIBILITY_SECRET
+          (so the OTP is not shown on the lock screen — privacy)
+    • Small icon: a custom lock/key vector (accent colored).
+    • Large icon: the source app's real icon.
+    • Content title: "🔐  OTP from {sourceApp}"
+    • Content text:  "1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 6️⃣"
+    • BigText: same as content text + " · Tap Copy to use."
+    • Category: CATEGORY_MESSAGE
+    • Priority: PRIORITY_MAX
+    • setAutoCancel(true)
+    • setOnlyAlertOnce(false)
+    • setColor: accent from theme
+    • Actions:
+        1. "Copy" — a PendingIntent.getBroadcast to our
+           CopyOtpReceiver. On tap:
+              - Copy the raw code (not the emoji) to ClipboardManager
+              - Show a brief confirmation toast via a second
+                silent notification or a system Toast
+              - Cancel this OTP notification immediately
+        2. "Dismiss" — a cancel intent.
+    • Full-screen intent: NO. Never. OTPs should not hijack the screen.
+    • Group key: "notifyvault.otp" so multiple OTPs stack cleanly
+      instead of flooding the shade.
+    • TIMEOUT: set timeoutAfter(60_000) — the OTP notification
+      disappears on its own after 60 seconds if not used.
+
+───────────────────────────────────────────────
+B.4  COPY RECEIVER
+───────────────────────────────────────────────
+
+Create CopyOtpReceiver (BroadcastReceiver).
+
+  onReceive:
+    1. Read the code from the intent extras.
+    2. Copy to ClipboardManager with the label "OTP".
+    3. Cancel the OTP notification by id.
+    4. Fire haptic: VibrationEffect.EFFECT_DOUBLE_CLICK.
+    5. Optionally show a floating glass toast
+       "OTP copied · 123456" — but this is optional.
+    6. NEVER store anything. This whole flow is ephemeral.
+
+  Register in manifest as exported=false.
+
+───────────────────────────────────────────────
+B.5  DO NOT STORE OUR OWN OTP NOTIFICATION
+───────────────────────────────────────────────
+
+The NotificationListenerService will ALSO see our own OTP
+notification. We must exclude it.
+
+  At the very top of onNotificationPosted():
+      if (sbn.packageName == context.packageName) return
+
+  This single check prevents the vault from ever archiving its own
+  notifications. Also prevents infinite loops.
+
+───────────────────────────────────────────────
+B.6  DEDUP FOR OUR OTP NOTIFICATIONS
+───────────────────────────────────────────────
+
+If the same OTP comes twice within 60 seconds (some banks re-send
+the same code), do not fire two notifications. Use a simple
+in-memory map:
+
+    lastOtpBySource: Map<String, Pair<String, Long>>
+
+  Keyed by sourcePackage. If code is same AND within 60s → skip.
+
+───────────────────────────────────────────────
+B.7  100% BACKGROUND RELIABILITY
+───────────────────────────────────────────────
+
+The OTP catcher MUST work even after:
+    • Reboots
+    • App being swiped away from recents
+    • Battery optimizations
+    • Doze mode
+    • Long idle periods
+
+Build all of the following:
+
+  1. FOREGROUND SERVICE
+     - Make NotificationListenerService a foreground service on
+       Android 8+.
+     - Persistent low-priority notification: "NotifyVault is
+       active" — this is REQUIRED by Android. Make it beautiful:
+       small accent key icon, no sound, IMPORTANCE_MIN so it sits
+       quietly at the bottom of the shade.
+
+  2. STICKY RESTART
+     - onStartCommand returns START_STICKY.
+     - Use a JobIntentService or WorkManager to re-bind the listener
+       periodically (every 15 minutes) as a heartbeat.
+
+  3. BOOT RECEIVER
+     - BroadcastReceiver for BOOT_COMPLETED,
+       LOCKED_BOOT_COMPLETED, and MY_PACKAGE_REPLACED.
+     - On boot, ensure the listener is connected and the OTP
+       channel is registered.
+
+  4. BATTERY OPTIMIZATION EXEMPTION
+     - On first app launch, show a beautiful onboarding card
+       explaining why we need to be exempt from battery
+       optimization.
+     - Button: "Allow" → opens
+       ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS.
+     - Also detect Android 13+ "Restricted" battery state and
+       prompt the user to move us to "Unrestricted".
+     - Also open the OEM-specific autostart screens for Xiaomi,
+       Oppo, Vivo, Realme, OnePlus, Huawei, Samsung via known
+       intents.
+
+  5. WORKMANAGER HEARTBEAT
+     - A PeriodicWorkRequest every 15 minutes that:
+         - Checks if the listener is connected.
+         - If not, tries to re-enable it via
+           NotificationManagerCompat or the app's own settings page.
+         - Logs a health metric.
+     - Use setExpedited where possible.
+
+  6. FOREGROUND SERVICE TYPE
+     - In AndroidManifest, declare
+       foregroundServiceType="dataSync" (or shortService as
+       appropriate) on the listener service.
+     - Request FOREGROUND_SERVICE permission.
+
+  7. POWER MANAGER
+     - Request PowerManager.isIgnoringBatteryOptimizations and
+       surface an onboarding prompt if not exempt.
+
+  8. WAKE LOCKS
+     - When an OTP is detected, briefly acquire a
+       PARTIAL_WAKE_LOCK for 5 seconds to guarantee delivery of
+       our notification, then release. Never hold longer.
+
+───────────────────────────────────────────────
+B.8  SETTINGS TOGGLES
+───────────────────────────────────────────────
+
+Add a new Settings section: OTP Catcher.
+
+  • Master toggle: "OTP Catcher" ON/OFF (default ON)
+  • Copy behavior: "Copy raw code" / "Copy with app name"
+  • Emoji digits: ON/OFF (some users prefer plain digits)
+  • Auto-dismiss after: 30s / 60s / 2m / Never
+  • Sound: Off / Default / Custom tone
+  • Vibration: Off / Short / Long
+  • Lockscreen visibility: Show / Hide (default Hide)
+  • Include OTPs from: All apps / Selected apps only (multi-select)
+  • Exclude from: multi-select (uses the premium app picker
+    built in v3.0)
+  • A live log of the last 20 OTPs caught (code masked, timestamp,
+    source) — clears on lock.
+
+───────────────────────────────────────────────
+B.9  EXCLUSION FOR OTP CATCHER
+───────────────────────────────────────────────
+
+Respect the exclude rules from v3.0. If a source app is excluded
+from capture, it is ALSO excluded from the OTP catcher.
+
+But allow an OVERRIDE: a small toggle in the OTP settings —
+"Catch OTPs even from excluded apps" (default ON, because users
+almost always want OTPs even if they've muted an app).
+
+
+═══════════════════════════════════════════════════════════════════
+  FINAL CHECKLIST
+═══════════════════════════════════════════════════════════════════
+
+  Dedup:
+  □ Fingerprint built from key + content hash.
+  □ Deduper returns InsertNew / UpdateExisting / SkipDuplicate.
+  □ Ongoing + group summary updates are collapsed.
+  □ lastSeenAt and updateCount tracked.
+  □ History table stores previous versions.
+  □ UI shows "updated N×" pill and a history section.
+  □ DB indexes present on fingerprintKey, contentHash, lastSeenAt.
+
+  OTP:
+  □ OtpDetector with keyword + regex + whitelist + false-positive
+    filtering.
+  □ EmojiDigits converter.
+  □ OtpNotifier fires high-priority notification with app name +
+    emoji digits + Copy action + Dismiss action.
+  □ Copy receiver copies raw code, cancels notification, haptics.
+  □ timeoutAfter(60s) set.
+  □ Lockscreen visibility hidden.
+  □ Our own notifications excluded from capture.
+  □ 60s dedup for repeated OTPs from same source.
+  □ Foreground service with beautiful persistent notification.
+  □ START_STICKY + boot receiver + WorkManager heartbeat.
+  □ Battery optimization exemption onboarding flow.
+  □ OEM autostart screens opened on first launch.
+  □ WAKE_LOCK for 5s on OTP detection, then released.
+  □ Settings section with all toggles.
+  □ Live OTP log (masked).
+  □ Respects exclude rules with override toggle.
+
+  Everything:
+  □ All DB work on Dispatchers.IO.
+  □ Insert within 50ms.
+  □ No crashes on any edge case.
+  □ Matches Obsidian Glass design system.
+
+Output the complete Kotlin + Compose code, file by file.
+Say "CONTINUE?" if you hit a length limit.

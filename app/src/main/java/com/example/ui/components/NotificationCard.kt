@@ -170,6 +170,18 @@ private fun DefaultNotificationCard(
                         )
                     )
 
+                    if (notification.isUpdate) {
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = if (notification.updateCount > 1) "updated ${notification.updateCount}×" else "updated",
+                            style = VaultCaption.copy(
+                                color = colors.accent.base,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+
                     if (isSelectionMode) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
