@@ -10,6 +10,7 @@ import android.os.Vibrator
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -129,6 +130,8 @@ fun AppPickerSheet(
     val colors = LocalVaultColors.current
     val context = LocalContext.current
     val vibrator = remember { context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator }
+
+    BackHandler(onBack = onClose)
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(AppPickerFilterTab.ALL) }

@@ -3,8 +3,10 @@ package com.example
 import android.os.Bundle
 import android.content.Intent
 import android.content.IntentFilter
+import android.app.Activity
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -95,10 +98,34 @@ fun NotifyVaultApp(
     val chipRepository = remember { FilterChipRepository.getInstance(context) }
     val hasPromptedQuickChips by chipRepository.hasPromptedQuickChipsSetup.collectAsStateWithLifecycle()
 
-    var currentRoute by remember { mutableStateOf("vault") }
+    val navigationStack = remember { mutableStateListOf("vault") }
     var selectedNotificationId by remember { mutableLongStateOf(1L) }
     var isOnboardingCompleted by remember { mutableStateOf(true) }
+    val currentRoute = navigationStack.lastOrNull() ?: "vault"
+    val topLevelRoutes = remember { setOf("vault", "search", "insights", "studio") }
     val isTopLevelRoute = currentRoute in setOf("vault", "search", "insights", "studio")
+    val activity = context as? Activity
+
+    fun navigateTo(route: String) {
+        if (route in topLevelRoutes) {
+            // Bottom navigation destinations are roots, not a growing stack.
+            navigationStack.clear()
+            navigationStack.add(route)
+        } else if (navigationStack.lastOrNull() != route) {
+            navigationStack.add(route)
+        }
+    }
+
+    fun navigateBack() {
+        if (navigationStack.size > 1) {
+            navigationStack.removeAt(navigationStack.lastIndex)
+        } else if (navigationStack.firstOrNull() != "vault") {
+            navigationStack.clear()
+            navigationStack.add("vault")
+        } else {
+            activity?.finish()
+        }
+    }
 
     // Dynamically apply or remove FLAG_SECURE
     DisposableEffect(isSecureRecents) {
@@ -198,6 +225,13 @@ fun NotifyVaultApp(
         return
     }
 
+    // One system-back policy for every normal app screen: dismiss nested
+    // destinations first, return to Vault from a top-level destination, and
+    // only finish the activity when Vault itself is visible.
+    BackHandler {
+        navigateBack()
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -216,18 +250,18 @@ fun NotifyVaultApp(
                     viewModel = viewModel,
                     onNavigateToDetail = { id ->
                         selectedNotificationId = id
-                        currentRoute = "detail"
+                        navigateTo("detail")
                     },
-                    onNavigateToSearch = { currentRoute = "search" },
-                    onNavigateToSettings = { currentRoute = "settings" }
+                    onNavigateToSearch = { navigateTo("search") },
+                    onNavigateToSettings = { navigateTo("settings") }
                 )
                 "search" -> SearchScreen(
                     viewModel = viewModel,
                     onNavigateToDetail = { id ->
                         selectedNotificationId = id
-                        currentRoute = "detail"
+                        navigateTo("detail")
                     },
-                    onBack = { currentRoute = "vault" }
+                    onBack = { navigateBack() }
                 )
                 "insights" -> InsightsScreen(
                     viewModel = viewModel
@@ -237,30 +271,30 @@ fun NotifyVaultApp(
                 )
                 "settings" -> SettingsScreen(
                     viewModel = viewModel,
-                    onBack = { currentRoute = "vault" },
-                    onNavigateToExclusionRules = { currentRoute = "exclusions" },
-                    onNavigateToReplayDebug = { currentRoute = "replay-debug" }
+                    onBack = { navigateBack() },
+                    onNavigateToExclusionRules = { navigateTo("exclusions") },
+                    onNavigateToReplayDebug = { navigateTo("replay-debug") }
                 )
                 "exclusions" -> ExclusionRulesScreen(
-                    onBack = { currentRoute = "settings" }
+                    onBack = { navigateBack() }
                 )
                 "detail" -> DetailScreen(
                     notificationId = selectedNotificationId,
                     viewModel = viewModel,
-                    onBack = { currentRoute = "vault" }
+                    onBack = { navigateBack() }
                 )
                 "replay-debug" -> ReplayDebugScreen(
                     viewModel = viewModel,
-                    onBack = { currentRoute = "settings" }
+                    onBack = { navigateBack() }
                 )
                 else -> HomeScreen(
                     viewModel = viewModel,
                     onNavigateToDetail = { id ->
                         selectedNotificationId = id
-                        currentRoute = "detail"
+                        navigateTo("detail")
                     },
-                    onNavigateToSearch = { currentRoute = "search" },
-                    onNavigateToSettings = { currentRoute = "settings" }
+                    onNavigateToSearch = { navigateTo("search") },
+                    onNavigateToSettings = { navigateTo("settings") }
                 )
             }
         }
@@ -269,7 +303,7 @@ fun NotifyVaultApp(
         if (isTopLevelRoute) {
             BottomGlassNav(
                 selectedRoute = currentRoute,
-                onNavigate = { route -> currentRoute = route },
+                onNavigate = { route -> navigateTo(route) },
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
