@@ -4,6 +4,7 @@ import android.app.Notification
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -34,5 +35,15 @@ class DeepLinkExtractorTest {
         }
 
         assertNull(DeepLinkExtractor.extract(notification, "com.example.sender", context))
+    }
+
+    @Test
+    fun acceptsShortHttpsNotificationLinks() {
+        assertTrue(
+            DeepLinkExtractor.isValidDeepLink(
+                "https://example.com/open",
+                "com.example.sender"
+            )
+        )
     }
 }

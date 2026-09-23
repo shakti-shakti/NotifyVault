@@ -42,10 +42,6 @@ object DeepLinkExtractor {
         "upi", "paytmmp", "phonepe", "gpay", "amazon", "flipkart",
         "swiggy", "zomato"
     )
-    private val contentSegments = listOf(
-        "/message/", "/chat/", "/thread/", "/item/", "/post/", "/article/",
-        "/product/", "/order/", "/tracking/", "/receipt/", "/payment/", "/invoice/"
-    )
     private val blockedHosts = listOf(
         "google-analytics", "doubleclick", "facebook.com/tr", "adjust.com",
         "branch.io"

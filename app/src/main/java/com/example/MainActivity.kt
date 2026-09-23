@@ -102,7 +102,7 @@ fun NotifyVaultApp(
 
     // Dynamically apply or remove FLAG_SECURE
     DisposableEffect(isSecureRecents) {
-        val window = (context as? ComponentActivity)?.window
+        val window = (context as? FragmentActivity)?.window
         if (isSecureRecents) {
             window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         } else {
